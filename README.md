@@ -1,3 +1,5 @@
+> **Warning: Early development — do not use in production yet. Updates may fail, interrupt imports or cause unexpected errors. Use only in a test environment with backups.**
+
 # OFF Proxy Server
 
 [Deutsch](README.de.md) · [GitHub](https://github.com/Nisbo/off-proxy-server)
@@ -19,6 +21,7 @@ lookup, not the entire Open Food Facts API.**
 - Retain source records without barcodes, report them separately, and never
   fabricate an EAN. Preserve leading zeros and nonstandard source identifiers.
 - Token-protected API on localhost by default; MongoDB has no published port.
+- Public test dashboard with dataset statistics, live import progress, next synchronization times and EAN lookup across all datasets.
 - Install, update, status, logs, product test, stop/start and rollback commands.
 
 There is **no product editing, search-by-name API or automatic online lookup for
@@ -97,6 +100,31 @@ rollback. If main has not changed, update does not restart services.
 The installer/update command must finish before closing the shell. Background
 imports then run independently. An interrupted unfinished full import restarts
 from the beginning; completed datasets remain published.
+
+## Test dashboard (no login yet)
+
+Open `http://<BIND_IP>:8097/` after updating. A browser running directly on the
+server can use `http://127.0.0.1:8097/`. The dashboard supports English and German;
+the language selection is retained locally in the browser.
+
+**The dashboard and its read-only `/ui/status` and `/ui/lookup` routes are
+intentionally accessible without a login in this early test version.** Anyone
+who can reach the port can view these statistics and the selected product fields.
+The existing `/health` and `/api/v3/product/...` routes still require the API key.
+No key is embedded in the web page, sent to the browser or required for GUI lookup.
+There are no dashboard controls that write product data or start imports.
+
+Progress shows processed records and compressed download bytes when a content
+length is available. A full first import has no known total record count, so no
+record percentage is invented. The next synchronization is recorded by the actual
+worker at cycle completion; the full-refresh date is the due date, checked on a
+subsequent synchronization cycle. Missing or overdue worker reports are indicated.
+Statistics use MongoDB metadata and a 30-second cache, not full product scans.
+The storage value includes allocated data and indexes (and ongoing import
+collections), excluding journal/filesystem overhead. It may differ from `du`.
+
+The first update installs the dashboard without reimporting existing datasets.
+Progress starts being recorded by the updated worker on its next import.
 
 ## API example
 

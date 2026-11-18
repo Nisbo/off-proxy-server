@@ -59,7 +59,7 @@ sys.exit(0)
 
     def archive(release):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy"):
+            for name in ("app.py", "dashboard.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy"):
                 data = (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)

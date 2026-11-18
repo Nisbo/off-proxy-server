@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4
+
+Adds a German/English dashboard on the existing HTTP port: published dataset
+counts, MongoDB storage, live import progress, worker state, next synchronization
+and full-refresh due dates, and EAN lookup across all datasets. The dashboard
+is intentionally unauthenticated for early local testing. The existing product
+API and health endpoint remain token-protected; no token is sent to the browser.
+Importer progress and scheduler metadata are additive. Existing product data,
+credentials and bindings are preserved. Prominent early-development warnings
+were added to the top of both READMEs.
+
 ## 0.1.3
 
 First public repository version. Existing standalone prototype functionality:

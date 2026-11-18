@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>OFF Proxy Server</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.4">
+  <script defer src="/assets/dashboard.js?v=0.1.4"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
+      <div class="header-actions"><span class="version" id="version">0.1.4</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+    </header>
+    <aside class="notice"><span aria-hidden="true">!</span><p data-i18n="warning">Early development · Test use only. This dashboard has no login. The product API still requires its key.</p></aside>
+    <section class="overview" aria-label="Overview">
+      <div class="stat"><span data-i18n="records">Published records</span><strong id="total-records">—</strong><small data-i18n="recordHint">All available datasets · metadata count</small></div>
+      <div class="stat"><span data-i18n="storage">MongoDB storage</span><strong id="storage">—</strong><small data-i18n="storageHint">Data + indexes, including ongoing imports</small></div>
+      <div class="stat"><span data-i18n="nextCheck">Next synchronization</span><strong class="stat-date" id="next-check">—</strong><small id="next-check-relative">—</small></div>
+      <div class="stat"><span data-i18n="datasets">Available datasets</span><strong id="ready-count">— / 4</strong><small id="overview-state">—</small></div>
+    </section>
+    <section class="panel activity-panel" aria-labelledby="activity-heading">
+      <div class="section-heading"><div><p class="eyebrow" data-i18n="live">LIVE STATUS</p><h2 id="activity-heading" data-i18n="activity">Synchronization</h2></div><span id="connection" class="badge neutral" role="status">—</span></div>
+      <p id="activity-text" class="activity-text">—</p>
+      <div id="activity-progress" hidden><label class="progress-label" for="job-progress"><span data-i18n="transfer">Download</span><span id="job-percent">—</span></label><progress id="job-progress" max="100"></progress><p class="muted" id="job-detail">—</p></div>
+      <p id="connection-error" class="error-message" role="status" hidden></p>
+    </section>
+    <section aria-labelledby="dataset-heading">
+      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh</button></div>
+      <div id="dataset-grid" class="dataset-grid"></div>
+    </section>
+    <section class="panel lookup-panel" aria-labelledby="lookup-heading">
+      <div class="section-heading"><div><p class="eyebrow" data-i18n="lookupEyebrow">LOCAL LOOKUP</p><h2 id="lookup-heading" data-i18n="lookup">Find a product</h2></div><span class="local-badge" data-i18n="readOnly">Read only</span></div>
+      <p class="muted" data-i18n="lookupHint">Search by EAN across all four datasets. Leading zeros are preserved. No data is changed.</p>
+      <form id="lookup-form">
+        <div><label for="ean" data-i18n="eanLabel">EAN / barcode</label><input id="ean" name="ean" type="text" inputmode="numeric" autocomplete="off" maxlength="256" pattern="[0-9]+" required placeholder="4062139025398"></div>
+        <div><label for="lookup-type" data-i18n="scope">Dataset</label><select id="lookup-type"><option value="all" data-i18n="all">All datasets</option><option value="food" data-i18n="food">Food</option><option value="beauty" data-i18n="beauty">Beauty</option><option value="petfood" data-i18n="petfood">Pet food</option><option value="product" data-i18n="product">Other products</option></select></div>
+        <button class="primary" id="lookup-button" type="submit" data-i18n="search">Search</button>
+      </form>
+      <p id="lookup-message" role="status" aria-live="polite" hidden></p>
+      <article id="lookup-result" class="product-result" hidden>
+        <img id="product-image" alt="" loading="lazy" referrerpolicy="no-referrer" hidden>
+        <div class="product-copy"><span class="eyebrow" id="lookup-source"></span><h3 id="product-name"></h3><dl><div><dt data-i18n="eanLabel">EAN / barcode</dt><dd id="product-code"></dd></div><div><dt data-i18n="brand">Brand</dt><dd id="product-brand"></dd></div><div><dt data-i18n="quantity">Package quantity</dt><dd id="product-quantity"></dd></div></dl><p class="muted" id="product-time"></p></div>
+      </article>
+    </section>
+    <footer><span>Open Food Facts contributors · ODbL-1.0</span><span id="updated">—</span></footer>
+    <noscript>JavaScript is required for the dashboard. / Für die Oberfläche ist JavaScript erforderlich.</noscript>
+  </main>
+</body>
+</html>

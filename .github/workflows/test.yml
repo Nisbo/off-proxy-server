@@ -31,4 +31,4 @@ jobs:
       - name: Build application image
         run: |
           docker build -t off-proxy-server:test .
-          docker run --rm off-proxy-server:test python -c 'import app; print(app.VERSION)'
+          docker run --rm off-proxy-server:test python -c 'import app; assert all((app.WEB / f).is_file() for f, _ in app.ASSETS.values()); print(app.VERSION)'

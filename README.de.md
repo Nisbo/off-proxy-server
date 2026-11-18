@@ -1,3 +1,5 @@
+> **Achtung: Frühe Entwicklung — derzeit nicht produktiv einsetzen. Updates können fehlschlagen, Importe unterbrechen oder unerwartete Fehler verursachen. Nur in einer Testumgebung und mit Datensicherung verwenden.**
+
 # OFF Proxy Server
 
 [English](README.md) · [GitHub](https://github.com/Nisbo/off-proxy-server)
@@ -22,6 +24,7 @@ vollständigen Nachbau aller OFF-API-Funktionen.**
 - API mit Zugangsschlüssel, zunächst nur lokal erreichbar. Kein veröffentlichter
   Datenbank-Port.
 - Kurze Befehle für Installation, Updates, Status, Logs, Produkttest und Rücknahme.
+- Offene Testoberfläche mit Statistik, Importfortschritt, nächsten Terminen und EAN-Abfrage über alle Bestände.
 
 **Noch nicht enthalten:** Namenssuche, Benutzer-Schreibzugriffe oder automatische
 OFF-Abfragen bei unbekannten Codes. Letzteres ist als optionale Erweiterung
@@ -104,6 +107,34 @@ Die Shell erst schließen, wenn der Installations-/Updatebefehl fertig ist.
 Anschließende Importe laufen selbstständig im Hintergrund, gegebenenfalls
 mehrere Stunden. Ein unterbrochener, unfertiger Vollimport beginnt erneut;
 bereits veröffentlichte Bestände bleiben erhalten.
+
+## Testoberfläche (vorerst ohne Anmeldung)
+
+Nach dem Update im Browser `http://<BIND_IP>:8097/` öffnen. Ein Browser direkt
+auf dem Server kann `http://127.0.0.1:8097/` verwenden. Die Oberfläche unterstützt
+Deutsch und Englisch; die Sprachauswahl wird lokal im Browser gespeichert.
+
+**Die GUI und ihre lesenden Routen `/ui/status` und `/ui/lookup` sind in dieser
+Testversion absichtlich ohne Anmeldung erreichbar.** Wer den Port erreichen kann,
+kann Statistik und die ausgewählten Produktfelder abfragen. Die bisherigen Routen
+`/health` und `/api/v3/product/...` verlangen weiterhin den API-Schlüssel. Dieser
+wird weder in die Webseite eingebaut noch an den Browser ausgegeben. Es gibt
+keine GUI-Aktionen zum Ändern von Produkten oder Starten von Imports.
+
+Der Fortschritt zeigt verarbeitete Datensätze und heruntergeladene komprimierte
+Bytes, sofern die Quelle ihre Gesamtgröße angibt. Eine Gesamtzahl von Datensätzen
+ist beim Erstimport nicht bekannt; dafür wird keine Prozentzahl erfunden.
+Der nächste Abgleich wird vom tatsächlichen Hintergrunddienst nach Ende eines
+Durchlaufs gespeichert. Beim Vollimport wird der Fälligkeitszeitpunkt angezeigt;
+ausgeführt wird er bei einem nachfolgenden Abgleich. Ausbleibende Rückmeldungen
+des Hintergrunddienstes werden kenntlich gemacht.
+
+Statistiken nutzen MongoDB-Metadaten und einen 30-Sekunden-Cache statt vollständiger
+Produktscans. Der Speicherwert umfasst belegten Daten-/Indexspeicher inklusive
+laufender Import-Collections, ohne Journal-/Dateisystem-Overhead. Er kann von
+`du` abweichen. Die GUI-Erweiterung übernimmt die vorhandenen Bestände; ein
+Vollimport ist dafür nicht erforderlich. Fortschritt wird ab dem nächsten
+Import des aktualisierten Hintergrunddienstes erfasst.
 
 ## API-Test mit curl
 

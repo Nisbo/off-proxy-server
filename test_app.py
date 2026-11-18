@@ -270,7 +270,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
     assert Path(".dockerignore").read_text().splitlines() == [
-        "*", "!app.py", "!Dockerfile", "!requirements.txt"]
+        "*", "!app.py", "!dashboard.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
 
@@ -292,3 +292,121 @@ def test_compose_only_api_port_is_published():
     assert "ports" not in compose["services"]["mongo"]
     assert "127.0.0.1" in compose["services"]["api"]["ports"][0]
     assert all(s["memswap_limit"] == s["mem_limit"] for s in compose["services"].values())
+
+
+@pytest.mark.parametrize("path,content_type", [
+    ("/", "text/html"), ("/assets/dashboard.js", "text/javascript"),
+    ("/assets/dashboard.css", "text/css"),
+])
+def test_dashboard_assets_public_but_contain_no_api_key(http, path, content_type):
+    with urllib.request.urlopen(http + path) as response:
+        body = response.read().decode()
+        assert response.status == 200
+        assert content_type in response.headers["Content-Type"]
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "x" * 32 not in body
+
+
+def test_dashboard_is_public_and_existing_api_remains_protected(http, db):
+    publish(db, "beauty", product("0000527000057", internal_sensitive="must not be exposed"))
+    status, data = get(http + "/ui/lookup?ean=0000527000057", auth=False)
+    assert status == 200 and data["product"]["product_type"] == "beauty"
+    assert data["product"]["code"] == "0000527000057"
+    assert "internal_sensitive" not in data["product"]
+    assert data["elapsed_ms"] >= 0
+    assert get(http + "/health", auth=False)[0] == 401
+    assert get(http + "/api/v3/product/0000527000057.json?product_type=all", auth=False)[0] == 401
+    assert get(http + "/api/v3/product/0000527000057.json?product_type=all")[0] == 200
+
+
+@pytest.mark.parametrize("query", [
+    "ean=123&fields=internal_sensitive", "ean=123&url=http://localhost",
+    "ean=%3Cscript%3E", "ean=123&lc=xx", "ean=123&product_type=unknown",
+])
+def test_dashboard_lookup_rejects_unsupported_requests(http, query):
+    assert get(http + "/ui/lookup?" + query, auth=False)[0] == 400
+
+
+def test_public_status_redacts_internal_state_and_counts_published_records(http, db):
+    publish(db)
+    db.state.update_one({"_id": "food"}, {"$set": {"API_TOKEN": "private-value", "internal_path": "/private/path"}})
+    db.scheduler.insert_one({"_id": "sync", "phase": "waiting", "next_check_epoch": 20000, "full_days": 14})
+    status, data = get(http + "/ui/status", auth=False)
+    assert status == 200
+    assert data["statistics"]["records"] == 1
+    assert data["datasets"]["food"]["next_full_epoch"] == 9999999999 + 14 * 86400
+    assert data["datasets"]["beauty"]["ready"] is False
+    assert data["scheduler"]["next_check_epoch"] == 20000
+    text = json.dumps(data)
+    assert "private-value" not in text and "internal_path" not in text
+    assert "collection" not in data["datasets"]["food"]
+
+
+def test_dashboard_statistics_are_cached_without_scanning_products(db):
+    from dashboard import Dashboard
+    publish(db)
+    dashboard = Dashboard(db, app.VERSION, app.PROJECTS)
+    first = dashboard.snapshot()
+    app.save_product(db[db.state.find_one({"_id": "food"})["collection"]], product("8715700117140"))
+    assert dashboard.snapshot()["statistics"] == first["statistics"]
+    dashboard._sampled = -100000
+    assert dashboard.snapshot()["statistics"]["records"] == 2
+
+
+def test_progress_counts_compressed_bytes_and_keeps_no_false_completion(db):
+    updates = []
+    body = compressed(product(), {"code": "", "_id": ""})
+    data = response(body)
+    data.headers["Content-Length"] = str(len(body))
+    count, unindexed = app.import_stream(data, db.products, "test", updates.append)
+    assert (count, unindexed) == (2, 1)
+    assert updates[0]["records"] == 0 and not updates[0]["finished"]
+    assert updates[-1]["records"] == 2 and updates[-1]["finished"]
+    assert updates[-1]["downloaded_bytes"] == len(body)
+    assert updates[-1]["total_bytes"] == len(body)
+    updates.clear()
+    with pytest.raises(EOFError):
+        app.import_stream(response(body[:-6]), db.products, "test", updates.append)
+    assert not any(update["finished"] for update in updates)
+
+
+def test_published_full_import_retains_progress_for_gui(db):
+    with patch.object(app, "open_url", return_value=response(compressed(product()))):
+        app.full_import(db, "food")
+    state = db.state.find_one({"_id": "food"})
+    assert state["progress"]["mode"] == "full"
+    assert state["progress"]["records"] == 1 and state["progress"]["finished"]
+    assert db.scheduler.find_one({"_id": "sync"})["heartbeat_epoch"] > 0
+
+
+def test_next_check_is_recorded_from_actual_cycle_end_and_cleared_on_stop(db):
+    import time
+    before = time.time()
+    captured = []
+    def wait(seconds):
+        captured.append(db.scheduler.find_one({"_id": "sync"}))
+        assert seconds == 600
+        app.STOP.set()
+    with patch.object(app, "sync_one"), patch.object(app.STOP, "wait", side_effect=wait), patch.dict(os.environ, SYNC_SECONDS="600", FULL_DAYS="14"):
+        app.sync_loop(db)
+    assert captured[0]["phase"] == "waiting"
+    assert before + 600 <= captured[0]["next_check_epoch"] <= time.time() + 600
+    stopped = db.scheduler.find_one({"_id": "sync"})
+    assert stopped["phase"] == "stopped" and stopped["next_check_epoch"] is None
+
+
+def test_scheduler_detects_overdue_worker_but_not_normal_wait(db):
+    import time
+    from dashboard import Dashboard
+    now = time.time()
+    dashboard = Dashboard(db, app.VERSION, app.PROJECTS)
+    db.scheduler.insert_one({"_id": "sync", "phase": "waiting", "heartbeat_epoch": now-3600, "next_check_epoch": now+30})
+    assert dashboard.snapshot()["scheduler"]["stale"] is False
+    db.scheduler.update_one({"_id": "sync"}, {"$set": {"phase": "running", "heartbeat_epoch": now-121}})
+    assert dashboard.snapshot()["scheduler"]["stale"] is True
+
+
+def test_gui_readmes_begin_with_development_warning():
+    from pathlib import Path
+    assert Path("README.md").read_text().startswith("> **Warning:")
+    assert Path("README.de.md").read_text().startswith("> **Achtung:")

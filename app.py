@@ -22,8 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from bson import json_util
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, PyMongoError
+from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -96,9 +97,35 @@ def delta_url(kind):
     return f"https://static.{PROJECTS[kind]}.org/data/delta/"
 
 
-def import_stream(response, collection, label):
+class CountingReader:
+    def __init__(self, response):
+        self.response, self.count = response, 0
+
+    def read(self, size=-1):
+        data = self.response.read(size)
+        self.count += len(data)
+        return data
+
+
+def import_stream(response, collection, label, progress=None):
     count = unindexed = 0
-    with gzip.GzipFile(fileobj=response) as stream:
+    reader = CountingReader(response)
+    try:
+        total = int(response.headers.get("Content-Length", "0")) or None
+    except (TypeError, ValueError):
+        total = None
+    started = time.time()
+    last_report = time.monotonic()
+
+    def report(finished=False):
+        if progress:
+            now = time.time()
+            progress({"records": count, "unindexed": unindexed, "downloaded_bytes": reader.count,
+                      "total_bytes": total, "started_epoch": started, "updated_epoch": now,
+                      "records_per_second": count / max(0.001, now - started), "finished": finished})
+
+    report()
+    with gzip.GzipFile(fileobj=reader) as stream:
         while True:
             if STOP.is_set():
                 raise InterruptedError("Import stopped; published collection retained")
@@ -120,8 +147,19 @@ def import_stream(response, collection, label):
                     LOG.warning("%s: record %s has no barcode; preserved without EAN index", label, count)
             if count % 10000 == 0:
                 LOG.info("%s: %s records processed", label, count)
+            if count % 250 == 0 and time.monotonic() - last_report >= 2:
+                report()
+                last_report = time.monotonic()
+    report(finished=True)
     LOG.info("%s: finished %s records (%s without barcode, preserved)", label, count, unindexed)
     return count, unindexed
+
+
+def progress_reporter(db, kind, mode):
+    def report(progress):
+        db.state.update_one({"_id": kind}, {"$set": {"progress": dict(progress, mode=mode)}}, upsert=True)
+        db.scheduler.update_one({"_id": "sync"}, {"$set": {"heartbeat_epoch": time.time()}}, upsert=True)
+    return report
 
 
 def full_import(db, kind):
@@ -135,13 +173,16 @@ def full_import(db, kind):
     collection = db[stage]
     started = time.time()
     db.state.update_one({"_id": kind}, {"$set": {
-        "phase": "full_import", "attempt_at": timestamp()}}, upsert=True)
+        "phase": "full_import", "attempt_at": timestamp(),
+        "progress": {"mode": "full", "records": 0, "unindexed": 0,
+                     "started_epoch": started, "updated_epoch": started,
+                     "downloaded_bytes": 0, "total_bytes": None, "finished": False}}}, upsert=True)
     published = False
     try:
         with open_url(export_url(kind)) as response:
             modified = response.headers.get("Last-Modified")
             source_time = email.utils.parsedate_to_datetime(modified).timestamp() if modified else started
-            count, unindexed = import_stream(response, collection, kind)
+            count, unindexed = import_stream(response, collection, kind, progress_reporter(db, kind, "full"))
         if not count:
             raise ValueError("Empty snapshot; previous collection retained")
         # Abort suspiciously truncated snapshots even if the gzip is valid.
@@ -199,9 +240,13 @@ def apply_deltas(db, kind):
             continue
         if start > cursor:
             raise ValueError("Delta gap: full import required")
-        db.state.update_one({"_id": kind}, {"$set": {"phase": "delta_import"}})
+        db.state.update_one({"_id": kind}, {"$set": {"phase": "delta_import",
+            "progress": {"mode": "delta", "records": 0, "unindexed": 0,
+                         "started_epoch": time.time(), "updated_epoch": time.time(),
+                         "downloaded_bytes": 0, "total_bytes": None, "finished": False}}})
         with open_url(delta_url(kind) + name) as response:
-            count, unindexed = import_stream(response, db[state["collection"]], name)
+            count, unindexed = import_stream(response, db[state["collection"]], name,
+                                             progress_reporter(db, kind, "delta"))
         # A failed file is replayed in full, never recorded as completed.
         cursor = end
         db.state.update_one({"_id": kind}, {"$set": {
@@ -227,25 +272,44 @@ def sync_one(db, kind):
 
 
 def sync_loop(db, once=False):
-    while not STOP.is_set():
-        failed = False
-        # Import small projects before the multi-GB food snapshot.
-        for kind in ORDER:
-            if STOP.is_set():
-                break
-            try:
-                sync_one(db, kind)
-            except InterruptedError:
-                return
-            except Exception as error:
-                failed = True
-                LOG.exception("%s: synchronization failed", kind)
-                db.state.update_one({"_id": kind}, {"$set": {
-                    "phase": "error", "error": str(error)[:500],
-                    "error_at": timestamp()}}, upsert=True)
-        if once:
-            return 1 if failed else 0
-        STOP.wait(max(60, int(os.environ.get("SYNC_SECONDS", "21600"))))
+    interval = max(60, int(os.environ.get("SYNC_SECONDS", "21600")))
+    days = float(os.environ.get("FULL_DAYS", "30"))
+    try:
+        while not STOP.is_set():
+            db.scheduler.update_one({"_id": "sync"}, {"$set": {
+                "phase": "running", "cycle_started_at": timestamp(), "heartbeat_epoch": time.time(),
+                "next_check_epoch": None, "active_kind": None,
+                "sync_seconds": interval, "full_days": days}}, upsert=True)
+            failed = False
+            # Import small projects before the multi-GB food snapshot.
+            for kind in ORDER:
+                if STOP.is_set():
+                    break
+                db.scheduler.update_one({"_id": "sync"}, {"$set": {
+                    "active_kind": kind, "heartbeat_epoch": time.time()}})
+                try:
+                    sync_one(db, kind)
+                except InterruptedError:
+                    return
+                except Exception as error:
+                    failed = True
+                    LOG.exception("%s: synchronization failed", kind)
+                    db.state.update_one({"_id": kind}, {"$set": {
+                        "phase": "error", "error": str(error)[:500],
+                        "error_at": timestamp()}}, upsert=True)
+            finished = time.time()
+            db.scheduler.update_one({"_id": "sync"}, {"$set": {
+                "phase": "idle" if once else "waiting", "active_kind": None,
+                "finished_at": timestamp(), "heartbeat_epoch": finished,
+                "next_check_epoch": None if once else finished + interval}})
+            if once:
+                return 1 if failed else 0
+            STOP.wait(interval)
+    finally:
+        if STOP.is_set():
+            db.scheduler.update_one({"_id": "sync"}, {"$set": {
+                "phase": "stopped", "active_kind": None, "next_check_epoch": None,
+                "heartbeat_epoch": time.time()}}, upsert=True)
 
 
 def image_fields(product, kind, language):
@@ -320,6 +384,7 @@ class Server(ThreadingHTTPServer):
     def __init__(self, address, db, token):
         super().__init__(address, Handler)
         self.db, self.token = db, token
+        self.dashboard = Dashboard(db, VERSION, PROJECTS)
         self.slots = threading.BoundedSemaphore(8)
 
     def process_request(self, request, client_address):
@@ -344,17 +409,58 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(15)
 
-    def send_json(self, status, payload):
-        body = json_util.dumps(payload, ensure_ascii=False).encode("utf-8")
+    def send_body(self, status, body, content_type):
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; "
+                         "connect-src 'self'; img-src 'self' data: https://images.openfoodfacts.org "
+                         "https://images.openbeautyfacts.org https://images.openpetfoodfacts.org "
+                         "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'")
         self.send_header("X-Data-Attribution", "Open Food Facts contributors; ODbL-1.0")
         self.end_headers()
         self.wfile.write(body)
 
+    def send_json(self, status, payload):
+        self.send_body(status, json_util.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+
+    def public_dashboard(self, parsed):
+        if parsed.path in ASSETS:
+            filename, content_type = ASSETS[parsed.path]
+            self.send_body(200, (WEB / filename).read_bytes(), content_type)
+            return True
+        if parsed.path == "/ui/status":
+            self.send_json(200, self.server.dashboard.snapshot())
+            return True
+        if parsed.path == "/ui/lookup":
+            params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            code = params.get("ean", [""])[0]
+            kind = params.get("product_type", ["all"])[0]
+            language = params.get("lc", ["en"])[0]
+            if (set(params) - {"ean", "lc", "product_type"} or not re.fullmatch(r"[0-9]{1,256}", code)
+                    or kind not in (*PROJECTS, "all") or language not in ("de", "en")):
+                self.send_json(400, {"error": "invalid_lookup"})
+                return True
+            started = time.perf_counter()
+            status, result = lookup(self.server.db, code, kind, language, LOOKUP_FIELDS)
+            result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            self.send_json(status, result)
+            return True
+        return False
+
     def do_GET(self):
+        parsed = urllib.parse.urlsplit(self.path)
+        try:
+            if self.public_dashboard(parsed):
+                return
+        except (PyMongoError, ValueError, TypeError):
+            LOG.exception("Dashboard request failed")
+            self.send_json(503, {"error": "database_unavailable"})
+            return
         expected = "Bearer " + self.server.token
         if not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
             self.send_json(401, {"error": "authentication_required"})
