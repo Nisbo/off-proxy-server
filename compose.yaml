@@ -1,6 +1,6 @@
 name: off-proxy-server
 x-app: &app
-  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.4}
+  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.5}
   build:
     context: ${OFF_PROXY_SOURCE_DIR:-.}
   restart: unless-stopped
@@ -51,7 +51,6 @@ services:
     environment:
       <<: *env
       SYNC_SECONDS: '21600'
-      FULL_DAYS: '30'
     command: [python, app.py, sync]
 networks:
   internal: {internal: true}

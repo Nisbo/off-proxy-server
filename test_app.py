@@ -197,7 +197,7 @@ def test_broken_delta_does_not_advance_cursor_and_can_retry(db):
     assert db.state.find_one({"_id": "food"})["delta_cursor"] == 150
 
 
-@pytest.mark.parametrize("index", [b"openfoodfacts_products_101_150.json.gz\n", b"../../evil.gz\n", b""])
+@pytest.mark.parametrize("index", [b"../../evil.gz\n", b""])
 def test_delta_gaps_and_invalid_index_rejected(db, index):
     publish(db)
     with patch.object(app, "open_url", return_value=response(index)), pytest.raises(ValueError):
@@ -270,7 +270,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
     assert Path(".dockerignore").read_text().splitlines() == [
-        "*", "!app.py", "!dashboard.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
+        "*", "!app.py", "!dashboard.py", "!control.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
 
@@ -334,7 +334,8 @@ def test_public_status_redacts_internal_state_and_counts_published_records(http,
     status, data = get(http + "/ui/status", auth=False)
     assert status == 200
     assert data["statistics"]["records"] == 1
-    assert data["datasets"]["food"]["next_full_epoch"] == 9999999999 + 14 * 86400
+    assert data["datasets"]["food"]["next_full_epoch"] is None
+    assert data["settings"]["full_import_policy"] == "confirm"
     assert data["datasets"]["beauty"]["ready"] is False
     assert data["scheduler"]["next_check_epoch"] == 20000
     text = json.dumps(data)
@@ -385,7 +386,7 @@ def test_next_check_is_recorded_from_actual_cycle_end_and_cleared_on_stop(db):
     captured = []
     def wait(seconds):
         captured.append(db.scheduler.find_one({"_id": "sync"}))
-        assert seconds == 600
+        assert 0 < seconds <= 2
         app.STOP.set()
     with patch.object(app, "sync_one"), patch.object(app.STOP, "wait", side_effect=wait), patch.dict(os.environ, SYNC_SECONDS="600", FULL_DAYS="14"):
         app.sync_loop(db)
@@ -410,3 +411,271 @@ def test_gui_readmes_begin_with_development_warning():
     from pathlib import Path
     assert Path("README.md").read_text().startswith("> **Warning:")
     assert Path("README.de.md").read_text().startswith("> **Achtung:")
+
+
+def delta_index(*intervals):
+    return ''.join(f'openfoodfacts_products_{a}_{b}.json.gz\n' for a, b in intervals).encode()
+
+
+def test_defaults_do_not_reimport_old_datasets_or_honor_legacy_env(db):
+    import control
+    publish(db)
+    db.state.update_one({'_id': 'food'}, {'$set': {'full_epoch': 1}})
+    with patch.dict(os.environ, FULL_DAYS='1'), patch.object(app, 'full_import') as full, patch.object(app, 'apply_deltas') as delta:
+        app.sync_one(db, 'food')
+    full.assert_not_called()
+    delta.assert_called_once()
+    assert control.settings(db) == control.DEFAULTS
+
+
+def test_initial_full_import_requires_confirmation_and_runs_once(db):
+    import control
+    with patch.object(app, 'full_import') as full:
+        app.sync_one(db, 'food')
+    full.assert_not_called()
+    assert db.state.find_one({'_id': 'food'})['phase'] == 'needs_full_import'
+    assert control.request(db, 'full:food') is True
+    assert control.request(db, 'full:food') is False
+    with patch.object(app, 'full_import', side_effect=lambda db, kind: publish(db, kind)) as full, patch.object(app, 'apply_deltas'):
+        app.sync_one(db, 'food')
+        app.sync_one(db, 'food')
+    assert full.call_count == 1
+    assert db.requests.find_one({'_id': 'full:food'})['status'] == 'done'
+
+
+def test_failed_confirmed_full_import_needs_another_confirmation(db):
+    import control
+    publish(db)
+    control.request(db, 'full:food')
+    with patch.object(app, 'full_import', side_effect=TimeoutError('unreachable')), pytest.raises(TimeoutError):
+        app.sync_one(db, 'food')
+    with patch.object(app, 'full_import') as full, patch.object(app, 'apply_deltas'):
+        app.sync_one(db, 'food')
+    full.assert_not_called()
+    assert db.requests.find_one({'_id': 'full:food'})['status'] == 'failed'
+    assert app.lookup(db, '4062139025398', 'food', 'de')[0] == 200
+
+
+def test_gap_continues_with_newer_deltas_and_later_repairs_missing_file(db):
+    publish(db)
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((100, 150), (200, 250))), response(compressed(product(version=15))), response(compressed(product(version=25)))]):
+        app.sync_one(db, 'food')
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_cursor'] == 250 and state['delta_gaps'] == [[150, 200]]
+    assert state['phase'] == 'partial' and state['full_reasons'] == ['gap']
+    assert state['ready'] is True
+    # A delayed historical file fills coverage; older product revisions do not overwrite newer ones.
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((100, 150), (150, 200), (200, 250))), response(compressed(product(version=20)))]):
+        app.sync_one(db, 'food')
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_gaps'] == [] and state['phase'] == 'ready' and state['full_reasons'] == []
+    assert db[state['collection']].find_one({'_id': '4062139025398'})['version'] == 25
+
+
+def test_expired_delta_window_is_visible_and_continues(db):
+    publish(db)
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((200, 250))), response(compressed(product(version=25)))]):
+        app.apply_deltas(db, 'food')
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_gaps'] == [[100, 200]] and state['delta_cursor'] == 250
+
+
+def test_pause_policy_stops_at_gap_but_allows_historical_repair(db):
+    import control
+    publish(db)
+    control.save_settings(db, {'delta_gap_policy': 'pause'})
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((100, 150), (200, 250))), response(compressed(product(version=15)))]) as opened:
+        app.apply_deltas(db, 'food')
+    assert opened.call_count == 2
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_gaps'] == [[150, 200]] and state['delta_cursor'] == 150 and state['phase'] == 'gap_paused'
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((150, 200), (200, 250))), response(compressed(product(version=20))), response(compressed(product(version=25)))]):
+        app.apply_deltas(db, 'food')
+    assert db.state.find_one({'_id': 'food'})['delta_gaps'] == []
+
+
+@pytest.mark.parametrize('code', [404, 410])
+def test_listed_but_missing_single_delta_is_recorded_as_gap(db, code):
+    publish(db)
+    error = urllib.error.HTTPError('https://example.invalid/delta', code, 'missing', {}, None)
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((100, 150), (150, 200), (200, 250))), response(compressed(product(version=15))), error, response(compressed(product(version=25)))]):
+        app.apply_deltas(db, 'food')
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_gaps'] == [[150, 200]] and state['delta_cursor'] == 250
+
+
+@pytest.mark.parametrize('where', ['index', 'file'])
+@pytest.mark.parametrize('code', [429, 500, 504])
+def test_temporary_http_failure_does_not_invent_gap_or_advance_cursor(db, where, code):
+    publish(db)
+    error = urllib.error.HTTPError('https://example.invalid/delta', code, 'temporary', {}, None)
+    responses = [error] if where == 'index' else [response(delta_index((100, 150))), error]
+    with patch.object(app, 'open_url', side_effect=responses), pytest.raises(urllib.error.HTTPError):
+        app.apply_deltas(db, 'food')
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_cursor'] == 100 and not state.get('delta_gaps')
+    # The next successful check downloads all missed intervals, regardless of days offline.
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((100, 150), (150, 200))), response(compressed(product(version=15))), response(compressed(product(version=20)))]):
+        app.apply_deltas(db, 'food')
+    assert db.state.find_one({'_id': 'food'})['delta_cursor'] == 200
+
+
+def test_full_import_closes_persistent_gaps(db):
+    publish(db)
+    db.state.update_one({'_id': 'food'}, {'$set': {'delta_gaps': [[100, 150]]}})
+    with patch.object(app, 'open_url', return_value=response(compressed(product()))):
+        app.full_import(db, 'food')
+    assert db.state.find_one({'_id': 'food'})['delta_gaps'] == []
+
+
+def test_optional_interval_only_requests_confirmation(db):
+    import control
+    publish(db)
+    control.save_settings(db, {'full_interval_days': 14})
+    db.state.update_one({'_id': 'food'}, {'$set': {'full_epoch': 1}})
+    with patch.object(app, 'full_import') as full, patch.object(app, 'apply_deltas'):
+        app.sync_one(db, 'food')
+    full.assert_not_called()
+    assert db.state.find_one({'_id': 'food'})['full_reasons'] == ['scheduled']
+    assert app.Dashboard(db, app.VERSION, app.PROJECTS).snapshot()['datasets']['food']['next_full_epoch'] == 1+14*86400
+
+
+@pytest.mark.parametrize('values', [{'full_import_policy': 'automatic'}, {'full_interval_days': True}, {'full_interval_days': -1}, {'full_interval_days': 0.5}, {'full_interval_days': 3651}, {'delta_gap_policy': 'bad'}, {'API_TOKEN': 'bad'}])
+def test_settings_reject_invalid_or_unconfirmed_values(db, values):
+    import control
+    with pytest.raises(ValueError):
+        control.save_settings(db, values)
+    assert control.settings(db) == control.DEFAULTS
+
+
+def test_automatic_full_imports_are_explicit_opt_in(db):
+    import control
+    control.save_settings(db, {'full_import_policy': 'automatic', 'confirm_automatic_full_imports': True})
+    with patch.object(app, 'full_import', side_effect=lambda db, kind: publish(db, kind)) as full, patch.object(app, 'apply_deltas'):
+        app.sync_one(db, 'food')
+    full.assert_called_once()
+
+
+def post_ui(base, path, values, nonce=None, origin=None):
+    headers = {'Content-Type': 'application/json'}
+    if nonce:
+        headers['X-Off-Proxy-Control'] = nonce
+    if origin:
+        headers['Origin'] = origin
+    request = urllib.request.Request(base + path, data=json.dumps(values).encode(), headers=headers)
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, json.load(error)
+
+
+def test_ui_control_requires_nonce_and_full_confirmation(http, db):
+    nonce = get(http + '/ui/status', auth=False)[1]['control_nonce']
+    assert post_ui(http, '/ui/sync', {})[0] == 403
+    assert post_ui(http, '/ui/sync', {}, nonce, 'https://unrelated.invalid')[0] == 403
+    assert post_ui(http, '/ui/sync', {}, nonce)[1]['queued'] is True
+    assert post_ui(http, '/ui/sync', {}, nonce)[1]['queued'] is False
+    assert post_ui(http, '/ui/full-import', {'kind': 'food'}, nonce)[0] == 400
+    assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': False}, nonce)[0] == 400
+    assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': True}, nonce)[0] == 202
+    assert db.requests.count_documents({'status': 'pending'}) == 2
+    assert db.list_collection_names() == ['requests']
+    assert get(http + '/api/v3/product/123.json', auth=False)[0] == 401
+
+
+def test_ui_settings_are_persistent_and_do_not_trigger_import(http, db):
+    import control
+    nonce = get(http + '/ui/status', auth=False)[1]['control_nonce']
+    assert post_ui(http, '/ui/settings', {'full_interval_days': 45}, nonce)[0] == 200
+    assert control.settings(db)['full_interval_days'] == 45
+    assert db.requests.count_documents({}) == 0
+
+
+def test_ui_refresh_is_read_only(http, db):
+    for _ in range(3):
+        assert get(http + '/ui/status', auth=False)[0] == 200
+    assert db.requests.count_documents({}) == db.settings.count_documents({}) == 0
+
+
+def test_worker_consumes_manual_request_without_second_importer(db):
+    import control
+    calls = []
+    def sync(db, kind):
+        calls.append(kind)
+        assert control.request(db, 'sync') is False  # Coalesced while active.
+    waits = []
+    def wait(seconds):
+        waits.append(seconds)
+        if len(waits) == 1:
+            control.request(db, 'sync')
+        else:
+            app.STOP.set()
+    with patch.object(app, 'sync_one', side_effect=sync), patch.object(app.STOP, 'wait', side_effect=wait):
+        app.sync_loop(db)
+    assert calls == list(app.ORDER) * 2
+
+
+def test_restart_does_not_replay_interrupted_full_approval(db):
+    db.requests.insert_one({'_id': 'full:food', 'status': 'running'})
+    with patch.object(app, 'full_import') as full:
+        app.sync_loop(db, once=True)
+    full.assert_not_called()
+    assert db.requests.find_one({'_id': 'full:food'})['status'] == 'failed'
+
+
+def test_range_merge_and_partial_repair():
+    import control
+    assert control.merge_ranges([[150, 200], [100, 160], [300, 400]]) == [[100, 200], [300, 400]]
+    assert control.cover_range([[100, 200]], 130, 170) == [[100, 130], [170, 200]]
+
+
+def test_full_request_during_automatic_import_is_coalesced(http, db):
+    nonce = get(http + '/ui/status', auth=False)[1]['control_nonce']
+    db.state.insert_one({'_id': 'food', 'phase': 'full_import'})
+    assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': True}, nonce)[1]['queued'] is False
+    assert db.requests.count_documents({}) == 0
+
+
+def test_covering_delta_does_not_create_a_false_gap(db):
+    publish(db)
+    with patch.object(app, 'open_url', side_effect=[response(delta_index((50, 200), (150, 250))), response(compressed(product(version=20))), response(compressed(product(version=25)))]):
+        app.apply_deltas(db, 'food')
+    state = db.state.find_one({'_id': 'food'})
+    assert state['delta_cursor'] == 250 and state['delta_gaps'] == []
+
+
+def test_timeout_retries_without_inventing_gap(db):
+    publish(db)
+    with patch.object(app, 'open_url', side_effect=TimeoutError('offline')), pytest.raises(TimeoutError):
+        app.apply_deltas(db, 'food')
+    assert db.state.find_one({'_id': 'food'})['delta_cursor'] == 100
+    assert not db.state.find_one({'_id': 'food'}).get('delta_gaps')
+
+
+def test_gap_stays_visible_after_later_checks(db):
+    publish(db)
+    db.state.update_one({'_id': 'food'}, {'$set': {'delta_cursor': 250, 'delta_gaps': [[150, 200]]}})
+    with patch.object(app, 'open_url', return_value=response(delta_index((200, 250)))):
+        app.sync_one(db, 'food')
+    assert db.state.find_one({'_id': 'food'})['delta_gaps'] == [[150, 200]]
+    dashboard = app.Dashboard(db, app.VERSION, app.PROJECTS).snapshot()
+    assert dashboard['datasets']['food']['ready'] is True
+    assert dashboard['datasets']['food']['phase'] == 'partial'
+    assert dashboard['datasets']['food']['delta_gaps'] == [[150, 200]]
+    assert dashboard['all_synced'] is False
+
+
+def test_interrupted_full_import_clears_busy_phase_for_new_confirmation(db):
+    import control
+    publish(db)
+    control.request(db, 'full:food')
+    def stop(*_):
+        app.STOP.set()
+        raise InterruptedError('stop requested')
+    with patch.object(app, 'open_url', side_effect=stop):
+        app.sync_loop(db, once=True)
+    state = db.state.find_one({'_id': 'food'})
+    assert state['phase'] == 'error' and state['ready'] is True
+    assert db.requests.find_one({'_id': 'full:food'})['status'] == 'failed'
+    assert control.request(db, 'full:food') is True

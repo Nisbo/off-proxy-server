@@ -15,8 +15,8 @@ vollständigen Nachbau aller OFF-API-Funktionen.**
   Tiernahrung und sonstigen Produkten. Bilder bleiben externe URLs.
 - EAN-Abfrage über `/api/v3/product/<barcode>.json`, mit `product_type`,
   Auswahl einfacher Felder über `fields` und `lc` für Bildauswahl.
-- Vollimport im Hintergrund, Delta-Prüfung alle sechs Stunden, Vollabgleich
-  nach 30 Tagen sowie bei fehlenden Änderungszeiträumen.
+- Delta-Prüfung alle sechs Stunden sowie manuell über die Oberfläche.
+- Vollimporte standardmäßig nur nach Bestätigung; regelmäßige Vollabgleiche deaktiviert.
 - Veröffentlichung eines Vollimports erst nach dessen vollständigem Erfolg.
 - Wiederholbare Deltas mit Schutz gegen Überschreiben durch ältere Produktstände.
 - Datensätze ohne Barcode bleiben erhalten und werden separat gezählt;
@@ -105,8 +105,9 @@ gestartet. Quellcode-Versionen bleiben für die Rücknahme lokal gespeichert.
 
 Die Shell erst schließen, wenn der Installations-/Updatebefehl fertig ist.
 Anschließende Importe laufen selbstständig im Hintergrund, gegebenenfalls
-mehrere Stunden. Ein unterbrochener, unfertiger Vollimport beginnt erneut;
-bereits veröffentlichte Bestände bleiben erhalten.
+mehrere Stunden. Ein unterbrochener, unfertiger Vollimport benötigt eine neue
+Bestätigung und beginnt dann erneut; veröffentlichte Bestände bleiben erhalten.
+Bei einer Erstinstallation die Oberfläche öffnen und den Erstimport pro Bestand bestätigen.
 
 ## Testoberfläche (vorerst ohne Anmeldung)
 
@@ -114,19 +115,23 @@ Nach dem Update im Browser `http://<BIND_IP>:8097/` öffnen. Ein Browser direkt
 auf dem Server kann `http://127.0.0.1:8097/` verwenden. Die Oberfläche unterstützt
 Deutsch und Englisch; die Sprachauswahl wird lokal im Browser gespeichert.
 
-**Die GUI und ihre lesenden Routen `/ui/status` und `/ui/lookup` sind in dieser
-Testversion absichtlich ohne Anmeldung erreichbar.** Wer den Port erreichen kann,
-kann Statistik und die ausgewählten Produktfelder abfragen. Die bisherigen Routen
+**Die GUI ist in dieser Testversion absichtlich ohne Anmeldung erreichbar. Wer
+den Port erreichen kann, kann Daten abfragen, Abgleiche anfordern und die
+Importeinstellungen ändern.** Nur im vertrauenswürdigen lokalen/VPN-Netz nutzen.
+Die Steuerung nutzt Same-Origin-Anfragen mit CSRF-Schutz; das ist keine Anmeldung.
+Die bisherigen Routen
 `/health` und `/api/v3/product/...` verlangen weiterhin den API-Schlüssel. Dieser
-wird weder in die Webseite eingebaut noch an den Browser ausgegeben. Es gibt
-keine GUI-Aktionen zum Ändern von Produkten oder Starten von Imports.
+wird weder in die Webseite eingebaut noch an den Browser ausgegeben. Produkte
+lassen sich nicht in der GUI bearbeiten. Importaufträge führt ausschließlich
+der vorhandene Hintergrunddienst aus; die GUI startet keinen zweiten Importer.
 
 Der Fortschritt zeigt verarbeitete Datensätze und heruntergeladene komprimierte
 Bytes, sofern die Quelle ihre Gesamtgröße angibt. Eine Gesamtzahl von Datensätzen
 ist beim Erstimport nicht bekannt; dafür wird keine Prozentzahl erfunden.
 Der nächste Abgleich wird vom tatsächlichen Hintergrunddienst nach Ende eines
 Durchlaufs gespeichert. Beim Vollimport wird der Fälligkeitszeitpunkt angezeigt;
-ausgeführt wird er bei einem nachfolgenden Abgleich. Ausbleibende Rückmeldungen
+geprüft wird er bei einem nachfolgenden Abgleich. Die Bestätigungspflicht gilt
+weiterhin. Ausbleibende Rückmeldungen
 des Hintergrunddienstes werden kenntlich gemacht.
 
 Statistiken nutzen MongoDB-Metadaten und einen 30-Sekunden-Cache statt vollständiger
@@ -171,8 +176,48 @@ angezeigt und erneut versucht; andere Bestände werden unabhängig verarbeitet.
 Die Tiernahrungsquelle wird in dieser Version bewusst nicht auf einen anderen
 Spiegel umgestellt.
 
-OFF stellt ungefähr 14 Tage Deltas bereit, ohne Löschmeldungen. Löschungen
-werden durch Vollabgleich übernommen. Bei einer Größenabnahme des Vollbestands
+Die Steuerung in der Oberfläche:
+
+- **Anzeige aktualisieren:** lädt nur die Anzeige neu. Produktzahlen können bis
+  zu 30 Sekunden zwischengespeichert sein.
+- **Daten jetzt abgleichen:** fordert eine Delta-Prüfung aller Bestände an.
+  Mehrfachklicks bei vorgemerktem/laufendem Auftrag werden zusammengefasst.
+  Im Leerlauf prüft der einzige Hintergrunddienst alle zwei Sekunden auf Aufträge;
+  laufende Importe werden zuerst beendet.
+- **Vollimport …:** vollständigen Download und Neuaufbau eines Bestands ausdrücklich
+  bestätigen. Vorhandene Daten bleiben abfragbar. Fehlgeschlagene oder unterbrochene
+  Vollimporte werden ohne neue Bestätigung nicht automatisch wiederholt.
+- **Einstellungen:** Verhalten bei Delta-Lücken, Vollimport-Bestätigung und optionales
+  Vollabgleich-Intervall. Einstellungen und Aufträge liegen in MongoDB und bleiben
+  bei Updates erhalten; `.env` bleibt unverändert.
+
+Standard auch beim Update von 0.1.4: verfügbare **Deltas weiter einspielen**, **alle
+Vollimporte bestätigen**, regelmäßige Vollabgleiche deaktiviert (Intervall `0`).
+Das alte `FULL_DAYS=30` schaltet keine automatischen Importe mehr ein. Ein optionales
+Intervall markiert bei aktiver Bestätigungspflicht nur die Fälligkeit. Automatische
+Vollimporte sind separat und mit ausdrücklicher Zustimmung einschaltbar; das gilt
+für Erstimporte, Lückenbehebung und aktivierte Intervalle.
+
+OFF stellt ungefähr 14 Tage Deltas bereit, ohne Löschmeldungen. Vollabgleiche
+übernehmen Löschungen und dauerhaft fehlende Änderungen. Beim Fortsetzen nach
+Lücken werden neuere Änderungen übernommen; Produkte, die nur im fehlenden
+Zeitraum geändert wurden, können veraltet bleiben. Der Bestand bleibt als
+unvollständig gekennzeichnet. Optional lassen sich stattdessen neuere Deltas nur
+für den betroffenen Bestand pausieren. Vorhandene Produkte und andere Bestände
+bleiben abfragbar.
+
+Lücken werden anhand der Start-/Endzeitstempel in den Dateinamen erkannt, nicht
+an Kalendertagen. Ein fehlender Zeitraum in einem erfolgreich geladenen Index
+oder HTTP 404/410 für eine dort aufgeführte Datei wird dauerhaft vermerkt.
+HTTP 5xx, 429 und Zeitüberschreitungen allein gelten **nicht** als Lücke: Der
+Dateifortschritt bleibt erhalten und unvollständige Dateien werden wiederholt.
+Nach drei Tagen Ausfall werden alle noch verfügbaren zusammenhängenden Deltas
+nachgeholt. Taucht eine fehlende Datei wieder auf, kann sie die Lücke nachträglich
+schließen; Versionsprüfungen verhindern das Überschreiben neuerer Produkte.
+Andernfalls bleibt die Warnung bis zum erfolgreichen bestätigten Vollimport.
+Fehlende Änderungen innerhalb einer sonst gültigen Quelldatei sind so nicht erkennbar.
+
+Bei einer Größenabnahme des Vollbestands
 um mehr als 25 Prozent wird zur Prüfung abgebrochen. Abgebrochene Delta-Dateien
 können einzelne Produkte bereits aktualisiert haben; der Dateifortschritt wird
 erst nach erfolgreichem Ende gespeichert und die Datei gegebenenfalls wiederholt.

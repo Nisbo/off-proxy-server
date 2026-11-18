@@ -146,7 +146,7 @@ activate() {
   [[ -z $old || $next == "$old" ]] || write_pointer previous "$old"
   write_pointer current "$next"
   install_command "$source"
-  printf 'OFF Proxy Server %s ready. Import/update runs in the background.\n' "$expected"
+  printf 'OFF Proxy Server %s ready. Delta checks run in the background; confirm full imports in the dashboard.\n' "$expected"
 }
 
 prepare_install() {

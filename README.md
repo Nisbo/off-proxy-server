@@ -15,9 +15,10 @@ lookup, not the entire Open Food Facts API.**
   Facts, Open Pet Food Facts and Open Products Facts. Images remain remote URLs.
 - Indexed barcode lookup: `/api/v3/product/<barcode>.json` with `product_type`,
   simple `fields` selection and `lc` for selected image URLs.
-- Background full imports; check daily delta files every six hours.
+- Check daily delta files every six hours; manual synchronization from the dashboard.
+- Full imports require confirmation by default; regular full refreshes are disabled.
 - Atomic full-dataset publication, replayable deltas, older-version protection,
-  detection of missing delta intervals and periodic full refreshes for deletions.
+  detection of missing delta intervals and optional full refreshes for deletions.
 - Retain source records without barcodes, report them separately, and never
   fabricate an EAN. Preserve leading zeros and nonstandard source identifiers.
 - Token-protected API on localhost by default; MongoDB has no published port.
@@ -97,9 +98,10 @@ version. Rollback restores software, **not a database backup**; no destructive
 database schema changes are made by this version. Releases are kept locally for
 rollback. If main has not changed, update does not restart services.
 
-The installer/update command must finish before closing the shell. Background
-imports then run independently. An interrupted unfinished full import restarts
-from the beginning; completed datasets remain published.
+The installer/update command must finish before closing the shell. Approved
+imports then run independently in the background. An interrupted unfinished full import
+needs a new confirmation and restarts from the beginning; completed datasets remain published.
+On a fresh installation, open the dashboard and confirm the initial import for each dataset.
 
 ## Test dashboard (no login yet)
 
@@ -107,18 +109,21 @@ Open `http://<BIND_IP>:8097/` after updating. A browser running directly on the
 server can use `http://127.0.0.1:8097/`. The dashboard supports English and German;
 the language selection is retained locally in the browser.
 
-**The dashboard and its read-only `/ui/status` and `/ui/lookup` routes are
-intentionally accessible without a login in this early test version.** Anyone
-who can reach the port can view these statistics and the selected product fields.
+**The dashboard is intentionally accessible without a login in this early test
+version. Anyone who can reach the port can view data, change synchronization
+settings and request imports.** Keep it on a trusted local/VPN network.
+The UI uses same-origin control requests with CSRF protection, not authentication.
 The existing `/health` and `/api/v3/product/...` routes still require the API key.
 No key is embedded in the web page, sent to the browser or required for GUI lookup.
-There are no dashboard controls that write product data or start imports.
+Product records cannot be edited through the GUI. Import controls ask the existing
+background worker to synchronize; they do not run a second importer.
 
 Progress shows processed records and compressed download bytes when a content
 length is available. A full first import has no known total record count, so no
 record percentage is invented. The next synchronization is recorded by the actual
-worker at cycle completion; the full-refresh date is the due date, checked on a
-subsequent synchronization cycle. Missing or overdue worker reports are indicated.
+worker at cycle completion. An optional full-refresh date is a due date, checked
+on a subsequent synchronization cycle; it does not override confirmation
+requirements. Missing or overdue worker reports are indicated.
 Statistics use MongoDB metadata and a 30-second cache, not full product scans.
 The storage value includes allocated data and indexes (and ongoing import
 collections), excluding journal/filesystem overhead. It may differ from `du`.
@@ -161,8 +166,41 @@ All four original JSONL sources are configured. An unavailable source is reporte
 and retried. Pet-food source routing has intentionally not been switched to a
 different mirror in this version. Other datasets continue importing independently.
 
-OFF retains approximately 14 days of deltas, without deletion events. A gap
-requires a full import; every 30 days a full refresh also reconciles deletions.
+The dashboard controls are:
+
+- **Refresh display:** reload status only. Product counts may be cached for 30 seconds.
+- **Synchronize now:** queue a delta check across all datasets. Repeated requests
+  while queued/running are coalesced. The single worker checks requests every two
+  seconds when idle; a running import finishes first.
+- **Full import…:** explicitly confirm a complete download/rebuild for one dataset.
+  Existing published data remains readable. Failed/interrupted requests are not
+  automatically retried as full imports.
+- **Settings:** choose how to handle delta gaps and full imports. Settings and
+  requests persist in MongoDB, survive updates, and do not modify `.env`.
+
+Safe defaults, including after upgrading from 0.1.4: continue applying available
+**deltas**, require confirmation for **all full imports**, and disable regular
+full refreshes (interval `0`). Legacy `FULL_DAYS=30` no longer enables automatic
+imports. An optional interval merely marks a refresh as due while confirmation
+is required. Automatic full imports require a separate explicit consent in settings;
+this opt-in covers initial imports, gap recovery and enabled intervals.
+
+OFF retains approximately 14 days of deltas, without deletion events. A full
+refresh reconciles deletions and permanently missing changes. When continuing
+past a gap, newer products become up to date but products changed only in the
+missing interval may remain outdated; the dataset stays marked as incomplete.
+Optionally pause newer deltas for only the affected dataset instead. Existing
+products and other datasets stay available.
+
+Coverage is determined from the start/end timestamps in delta filenames, not
+from calendar days. A missing interval in a successfully loaded index, or a
+listed file returning HTTP 404/410, is recorded as a persistent gap. HTTP 5xx,
+429 and timeouts alone do **not** establish a gap: the file cursor is retained
+and incomplete files are retried. After three offline days, all still available
+contiguous deltas are replayed. If a missing file reappears, historical deltas
+are replayed to close that gap; revision checks prevent overwriting newer data.
+Otherwise the warning remains until a confirmed full import succeeds. These
+checks cannot detect changes omitted inside an otherwise valid upstream file.
 A >25% snapshot size decrease requires review rather than automatically
 discarding a large part of a published dataset. Full import publication is atomic.
 Delta files advance the cursor only when complete; a failed file may have already

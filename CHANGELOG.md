@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.5
+
+- EN: Refresh display and queue manual synchronization through the existing worker.
+  Persistent settings default to continuing available deltas, confirmed full imports
+  only, and no regular full refresh. Optional automatic imports require explicit consent.
+- EN: Track missing delta intervals and 404/410 files without treating temporary
+  outages as gaps. Repair returning historical deltas, preserve incomplete coverage
+  warnings, and optionally pause affected datasets. Add per-dataset full-import confirmation.
+- DE: Anzeige aktualisieren und manuellen Datenabgleich über den vorhandenen Dienst
+  anfordern. Dauerhafte Einstellungen: standardmäßig verfügbare Deltas fortsetzen,
+  Vollimporte nur bestätigt und kein regelmäßiger Vollabgleich. Automatik nur nach Zustimmung.
+- DE: Delta-Lücken und fehlende Dateien dauerhaft erfassen; vorübergehende Ausfälle
+  gelten nicht als Lücke. Wieder verfügbare Deltas nachholen, Lücken anzeigen und
+  betroffene Bestände optional pausieren. Vollimporte pro Bestand bestätigen.
+
 ## 0.1.4
 
 Adds a German/English dashboard on the existing HTTP port: published dataset

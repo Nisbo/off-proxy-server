@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from pymongo.errors import PyMongoError
+import control
 
 WEB = Path(__file__).with_name("web")
 ASSETS = {
@@ -19,6 +20,7 @@ LOOKUP_FIELDS = (
 STATE_FIELDS = (
     "phase", "ready", "full_at", "full_epoch", "checked_at", "delta_at",
     "source_modified", "error", "error_at", "unindexed_records",
+    "delta_gaps", "full_reasons",
 )
 PROGRESS_FIELDS = (
     "mode", "records", "unindexed", "downloaded_bytes", "total_bytes",
@@ -26,7 +28,7 @@ PROGRESS_FIELDS = (
 )
 SCHEDULER_FIELDS = (
     "phase", "active_kind", "cycle_started_at", "finished_at", "heartbeat_epoch",
-    "next_check_epoch", "sync_seconds", "full_days",
+    "next_check_epoch", "sync_seconds",
 )
 
 
@@ -68,7 +70,8 @@ class Dashboard:
         states = {kind: raw.get(kind, {}) for kind in self.projects}
         scheduler = self.db.scheduler.find_one({"_id": "sync"}) or {}
         stats = self.statistics(states)
-        days = scheduler.get("full_days", 30)
+        options = control.settings(self.db)
+        days = options["full_interval_days"]
         datasets = {}
         for kind, state in states.items():
             public = {key: state[key] for key in STATE_FIELDS if key in state}
@@ -76,7 +79,7 @@ class Dashboard:
             public.setdefault("phase", "pending")
             public["records"] = stats["counts"][kind]
             public["snapshot_records"] = state.get("records")
-            public["next_full_epoch"] = state["full_epoch"] + days * 86400 if state.get("full_epoch") else None
+            public["next_full_epoch"] = state["full_epoch"] + days * 86400 if days and state.get("full_epoch") else None
             progress = state.get("progress")
             public["progress"] = {key: progress[key] for key in PROGRESS_FIELDS if key in progress} if isinstance(progress, dict) else None
             datasets[kind] = public
@@ -90,6 +93,9 @@ class Dashboard:
             (schedule["phase"] == "running" and now - heartbeat > 120) or
             (schedule["phase"] == "waiting" and deadline and now > deadline + 120)))
         return {"version": self.version, "server_epoch": now, "datasets": datasets,
+                "settings": options,
+                "requests": {r["_id"]: {k: r[k] for k in ("status", "error") if k in r}
+                             for r in self.db.requests.find({}) if r["_id"] in ("sync", *("full:" + k for k in self.projects))},
                 "scheduler": schedule, "statistics": {k: v for k, v in stats.items() if k != "counts"},
                 "all_ready": all(s["ready"] for s in datasets.values()),
                 "all_synced": all(s["ready"] and s["phase"] == "ready" for s in datasets.values())}

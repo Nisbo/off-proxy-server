@@ -590,3 +590,20 @@ footer {
     gap:5px;
   }
 }
+
+.control-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.dataset-heading { flex-wrap: wrap; gap: 16px; }
+.dataset-warning { color: #e9c58b; line-height: 1.6; overflow-wrap: anywhere; }
+#control-message { margin: 0 0 18px; line-height: 1.6; color: var(--muted); }
+.full-button { margin-top: 18px; }
+dialog { color: var(--text, #edf3fa); background: #192430; border: 1px solid #40566c; border-radius: 20px; width: min(620px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 28px; overflow-y: auto; }
+dialog::backdrop { background: rgb(0 0 0 / 65%); }
+dialog h2 { margin-bottom: 20px; }
+dialog p { line-height: 1.6; }
+dialog label { display: block; margin-top: 20px; margin-bottom: 8px; }
+dialog select, dialog input[type="number"] { width: 100%; }
+dialog .control-actions { margin-top: 24px; }
+dialog .check-row { display: flex; align-items: flex-start; gap: 12px; line-height: 1.5; }
+dialog .check-row input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 3px; }
+[hidden] { display: none !important; }
+@media (max-width: 600px) { dialog { padding: 20px; } .control-actions button { flex: 1 1 auto; } }

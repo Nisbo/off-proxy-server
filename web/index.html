@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.4">
-  <script defer src="/assets/dashboard.js?v=0.1.4"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.5">
+  <script defer src="/assets/dashboard.js?v=0.1.5"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><span class="version" id="version">0.1.4</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><span class="version" id="version">0.1.5</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <aside class="notice"><span aria-hidden="true">!</span><p data-i18n="warning">Early development · Test use only. This dashboard has no login. The product API still requires its key.</p></aside>
     <section class="overview" aria-label="Overview">
@@ -29,7 +29,8 @@
       <p id="connection-error" class="error-message" role="status" hidden></p>
     </section>
     <section aria-labelledby="dataset-heading">
-      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh</button></div>
+      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><div class="control-actions"><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh display</button><button class="primary" id="sync" type="button" disabled data-i18n="syncNow">Synchronize now</button><button class="secondary" id="settings" type="button" disabled data-i18n="settings">Settings</button></div></div>
+      <p id="control-message" role="status" hidden></p>
       <div id="dataset-grid" class="dataset-grid"></div>
     </section>
     <section class="panel lookup-panel" aria-labelledby="lookup-heading">
@@ -49,5 +50,26 @@
     <footer><span>Open Food Facts contributors · ODbL-1.0</span><span id="updated">—</span></footer>
     <noscript>JavaScript is required for the dashboard. / Für die Oberfläche ist JavaScript erforderlich.</noscript>
   </main>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <h2 id="settings-title" data-i18n="settings">Settings</h2>
+      <label for="gap-policy" data-i18n="gapPolicy">When delta coverage is incomplete</label>
+      <select id="gap-policy"><option value="continue" data-i18n="gapContinue">Apply available deltas</option><option value="pause" data-i18n="gapPause">Pause updates for this dataset</option></select>
+      <p class="muted" data-i18n="gapHelp"></p>
+      <label for="full-policy" data-i18n="fullPolicy">Full imports</label>
+      <select id="full-policy"><option value="confirm" data-i18n="fullConfirm">Only after confirmation</option><option value="automatic" data-i18n="fullAutomatic">Allow automatic full imports</option></select>
+      <label for="full-days" data-i18n="fullInterval">Regular full refresh interval in days (0 = disabled)</label>
+      <input id="full-days" type="number" min="0" max="3650" step="1" required>
+      <p class="muted" data-i18n="fullHelp"></p>
+      <label class="check-row" id="auto-confirm-row" hidden><input id="auto-confirm" type="checkbox"><span data-i18n="autoConsent"></span></label>
+      <p id="settings-error" class="error-message" role="status" hidden></p>
+      <div class="control-actions"><button class="primary" id="settings-save" type="submit" data-i18n="save">Save</button><button class="secondary" type="button" id="settings-cancel" data-i18n="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+  <dialog id="full-dialog" aria-labelledby="full-title">
+    <h2 id="full-title" data-i18n="fullTitle">Confirm full import</h2>
+    <p id="full-dataset"></p><p data-i18n="fullWarning"></p>
+    <div class="control-actions"><button class="primary" id="full-start" type="button" data-i18n="fullStart">Start full import</button><button class="secondary" id="full-cancel" type="button" data-i18n="cancel">Cancel</button></div>
+  </dialog>
 </body>
 </html>

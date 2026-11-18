@@ -1,6 +1,7 @@
 *
 !app.py
 !dashboard.py
+!control.py
 !Dockerfile
 !requirements.txt
 !web/

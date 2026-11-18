@@ -10,10 +10,12 @@ import logging
 import math
 import os
 import re
+import secrets
 import signal
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -23,8 +25,9 @@ from bson import json_util
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
+import control
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -195,7 +198,7 @@ def full_import(db, kind):
             "unindexed_records": unindexed,
             "full_at": timestamp(), "full_epoch": time.time(),
             "delta_cursor": cursor, "source_modified": modified,
-            "phase": "ready", "error": None}}, upsert=True)
+            "phase": "ready", "error": None, "delta_gaps": [], "full_reasons": []}}, upsert=True)
         published = True
         # Readers retry the pointer if an old generation disappeared mid-request.
         if old.get("collection") and old["collection"] != stage:
@@ -233,55 +236,114 @@ def apply_deltas(db, kind):
         raise ValueError("Delta index too large")
     files = parse_deltas(raw.decode("utf-8"), PROJECTS[kind])
     cursor = state["delta_cursor"]
-    if cursor < files[0][0]:
-        raise ValueError("Delta gap: full import required")
+    gaps = control.merge_ranges(state.get("delta_gaps", []))
+    horizon = max([cursor] + [end for _, end in gaps])
+    pause = control.settings(db)["delta_gap_policy"] == "pause"
+
+    def persist():
+        db.state.update_one({"_id": kind}, {"$set": {"delta_gaps": gaps}})
+
     for start, end, name in files:
-        if end <= cursor:
+        if end <= cursor and not any(start < high and end > low for low, high in gaps):
             continue
-        if start > cursor:
-            raise ValueError("Delta gap: full import required")
+        if start > horizon:
+            gaps = control.merge_ranges([*gaps, [horizon, start]])
+            horizon = start
+            persist()
+        # A returning historical file may repair the earliest gap even in pause mode.
+        if pause and gaps and start > gaps[0][0]:
+            break
         db.state.update_one({"_id": kind}, {"$set": {"phase": "delta_import",
             "progress": {"mode": "delta", "records": 0, "unindexed": 0,
                          "started_epoch": time.time(), "updated_epoch": time.time(),
                          "downloaded_bytes": 0, "total_bytes": None, "finished": False}}})
-        with open_url(delta_url(kind) + name) as response:
-            count, unindexed = import_stream(response, db[state["collection"]], name,
-                                             progress_reporter(db, kind, "delta"))
-        # A failed file is replayed in full, never recorded as completed.
-        cursor = end
+        try:
+            with open_url(delta_url(kind) + name) as response:
+                count, unindexed = import_stream(response, db[state["collection"]], name,
+                                                 progress_reporter(db, kind, "delta"))
+        except urllib.error.HTTPError as error:
+            if error.code not in (404, 410):
+                raise
+            # Only an explicitly absent file establishes a gap, not a timeout/5xx.
+            if end > horizon:
+                gaps = control.merge_ranges([*gaps, [max(start, horizon), end]])
+                horizon = end
+                persist()
+            if pause and gaps:
+                break
+            continue
+        gaps = control.cover_range(gaps, start, end)
+        cursor = max(cursor, end)
+        horizon = max(horizon, end)
+        # Commit coverage only after gzip validation; failed files are replayed.
         db.state.update_one({"_id": kind}, {"$set": {
-            "delta_cursor": cursor, "last_delta": name,
+            "delta_cursor": cursor, "delta_gaps": gaps, "last_delta": name,
             "delta_at": timestamp(), "delta_records": count,
             "delta_unindexed_records": unindexed}})
     db.state.update_one({"_id": kind}, {"$set": {
-        "phase": "ready", "error": None, "checked_at": timestamp()}})
+        "phase": ("gap_paused" if pause else "partial") if gaps else "ready",
+        "delta_gaps": gaps, "error": None, "checked_at": timestamp()}})
+
+
+def full_reasons(state, settings):
+    reasons = []
+    if not state.get("ready"):
+        reasons.append("initial")
+    if state.get("delta_gaps"):
+        reasons.append("gap")
+    days = settings["full_interval_days"]
+    if state.get("ready") and days and time.time() - state.get("full_epoch", 0) >= days * 86400:
+        reasons.append("scheduled")
+    return reasons
 
 
 def sync_one(db, kind):
+    options = control.settings(db)
     state = db.state.find_one({"_id": kind}) or {}
-    due = time.time() - state.get("full_epoch", 0) > float(os.environ.get("FULL_DAYS", "30")) * 86400
-    if not state.get("ready") or due:
-        full_import(db, kind)
+    approved = control.claim(db, "full:" + kind)
+    imported = False
     try:
+        if approved or (options["full_import_policy"] == "automatic" and full_reasons(state, options)):
+            full_import(db, kind)
+            imported = True
+        elif not state.get("ready"):
+            db.state.update_one({"_id": kind}, {"$set": {
+                "phase": "needs_full_import", "full_reasons": ["initial"]}}, upsert=True)
+            return
         apply_deltas(db, kind)
-    except ValueError as error:
-        if str(error) != "Delta gap: full import required":
-            raise
-        full_import(db, kind)
-        apply_deltas(db, kind)
+        state = db.state.find_one({"_id": kind}) or {}
+        if (not imported and state.get("delta_gaps") and options["full_import_policy"] == "automatic"):
+            full_import(db, kind)
+            apply_deltas(db, kind)
+    except Exception as error:
+        if approved:
+            control.finish(db, "full:" + kind, str(error)[:500])
+        raise
+    else:
+        if approved:
+            control.finish(db, "full:" + kind)
+    finally:
+        state = db.state.find_one({"_id": kind}) or {}
+        db.state.update_one({"_id": kind}, {"$set": {"full_reasons": full_reasons(state, options)}})
 
 
 def sync_loop(db, once=False):
     interval = max(60, int(os.environ.get("SYNC_SECONDS", "21600")))
-    days = float(os.environ.get("FULL_DAYS", "30"))
+    # A process restart never silently reauthorizes an interrupted full import.
+    db.requests.update_many({"status": "running"}, {"$set": {
+        "status": "failed", "error": "Worker restarted; request again", "finished_epoch": time.time()}})
+    db.state.update_many({"phase": {"$in": ["full_import", "delta_import"]}}, {"$set": {
+        "phase": "error", "error": "Worker restarted; interrupted import retained no completion marker",
+        "error_at": timestamp()}})
     try:
         while not STOP.is_set():
+            db.requests.update_one({"_id": "sync"}, {"$set": {
+                "status": "running", "started_epoch": time.time(), "error": None}}, upsert=True)
             db.scheduler.update_one({"_id": "sync"}, {"$set": {
                 "phase": "running", "cycle_started_at": timestamp(), "heartbeat_epoch": time.time(),
                 "next_check_epoch": None, "active_kind": None,
-                "sync_seconds": interval, "full_days": days}}, upsert=True)
+                "sync_seconds": interval}}, upsert=True)
             failed = False
-            # Import small projects before the multi-GB food snapshot.
             for kind in ORDER:
                 if STOP.is_set():
                     break
@@ -290,6 +352,8 @@ def sync_loop(db, once=False):
                 try:
                     sync_one(db, kind)
                 except InterruptedError:
+                    db.state.update_one({"_id": kind}, {"$set": {
+                        "phase": "error", "error": "Synchronization interrupted", "error_at": timestamp()}})
                     return
                 except Exception as error:
                     failed = True
@@ -297,6 +361,7 @@ def sync_loop(db, once=False):
                     db.state.update_one({"_id": kind}, {"$set": {
                         "phase": "error", "error": str(error)[:500],
                         "error_at": timestamp()}}, upsert=True)
+            control.finish(db, "sync", "One or more sources failed" if failed else None)
             finished = time.time()
             db.scheduler.update_one({"_id": "sync"}, {"$set": {
                 "phase": "idle" if once else "waiting", "active_kind": None,
@@ -304,12 +369,16 @@ def sync_loop(db, once=False):
                 "next_check_epoch": None if once else finished + interval}})
             if once:
                 return 1 if failed else 0
-            STOP.wait(interval)
+            # The sole worker polls durable UI requests; the API never imports products.
+            deadline = time.monotonic() + interval
+            while not STOP.is_set() and time.monotonic() < deadline:
+                if db.requests.find_one({"status": "pending"}):
+                    break
+                STOP.wait(min(2, max(0, deadline - time.monotonic())))
     finally:
         if STOP.is_set():
             db.scheduler.update_one({"_id": "sync"}, {"$set": {
-                "phase": "stopped", "active_kind": None, "next_check_epoch": None,
-                "heartbeat_epoch": time.time()}}, upsert=True)
+                "phase": "stopped", "active_kind": None, "next_check_epoch": None}})
 
 
 def image_fields(product, kind, language):
@@ -385,6 +454,7 @@ class Server(ThreadingHTTPServer):
         super().__init__(address, Handler)
         self.db, self.token = db, token
         self.dashboard = Dashboard(db, VERSION, PROJECTS)
+        self.control_nonce = secrets.token_urlsafe(32)
         self.slots = threading.BoundedSemaphore(8)
 
     def process_request(self, request, client_address):
@@ -434,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(200, (WEB / filename).read_bytes(), content_type)
             return True
         if parsed.path == "/ui/status":
-            self.send_json(200, self.server.dashboard.snapshot())
+            self.send_json(200, {**self.server.dashboard.snapshot(), "control_nonce": self.server.control_nonce})
             return True
         if parsed.path == "/ui/lookup":
             params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
@@ -501,6 +571,43 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(status, payload)
         except (PyMongoError, ValueError, TypeError):
             LOG.exception("API request failed")
+            self.send_json(503, {"error": "database_unavailable"})
+
+    def do_POST(self):
+        # No login is intentional for this LAN test UI. This nonce is CSRF protection,
+        # not authentication, and is unrelated to the protected product API key.
+        origin = urllib.parse.urlsplit(self.headers.get("Origin", ""))
+        if (not hmac.compare_digest(self.headers.get("X-Off-Proxy-Control", ""), self.server.control_nonce)
+                or self.headers.get("Sec-Fetch-Site") == "cross-site"
+                or (origin.netloc and origin.netloc != self.headers.get("Host"))):
+            self.send_json(403, {"error": "control_denied"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 4096 or self.headers.get_content_type() != "application/json":
+                raise ValueError("Invalid request body")
+            values = json.loads(self.rfile.read(length))
+            if not isinstance(values, dict):
+                raise ValueError("Expected an object")
+            path = urllib.parse.urlsplit(self.path).path
+            if path == "/ui/settings":
+                self.send_json(200, {"settings": control.save_settings(self.server.db, values)})
+            elif path == "/ui/sync" and not values:
+                queued = control.request(self.server.db, "sync")
+                self.send_json(202, {"queued": queued})
+            elif path == "/ui/full-import":
+                if (set(values) != {"kind", "confirmed"} or values.get("kind") not in PROJECTS
+                        or values.get("confirmed") is not True):
+                    raise ValueError("Full import requires a dataset and confirmation")
+                state = self.server.db.state.find_one({"_id": values["kind"]}) or {}
+                queued = False if state.get("phase") == "full_import" else control.request(self.server.db, "full:" + values["kind"])
+                self.send_json(202, {"queued": queued})
+            else:
+                self.send_json(400, {"error": "invalid_control"})
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "invalid_control"})
+        except PyMongoError:
+            LOG.exception("Dashboard control failed")
             self.send_json(503, {"error": "database_unavailable"})
 
     def log_message(self, fmt, *args):
