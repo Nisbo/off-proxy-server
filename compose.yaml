@@ -1,0 +1,58 @@
+name: off-proxy-server
+x-app: &app
+  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.3}
+  build:
+    context: ${OFF_PROXY_SOURCE_DIR:-.}
+  restart: unless-stopped
+  init: true
+  environment: &env
+    MONGO_URI: mongodb://mongo:27017/
+    API_TOKEN: ${API_TOKEN:?API_TOKEN fehlt}
+  depends_on:
+    mongo:
+      condition: service_healthy
+  mem_limit: 384m
+  memswap_limit: 384m
+  cpus: 0.5
+  read_only: true
+  tmpfs: [/tmp:size=32m]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: 5m, max-file: '2'}
+services:
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    command: [mongod, --wiredTigerCacheSizeGB, '0.3', --bind_ip_all]
+    volumes: [./data:/data/db, ./configdb:/data/configdb]
+    networks: [internal]
+    mem_limit: 1200m
+    memswap_limit: 1200m
+    cpus: 1
+    healthcheck:
+      test: [CMD, mongosh, --quiet, --eval, 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)']
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+  api:
+    <<: *app
+    networks: [internal, outbound]
+    ports: ['${BIND_IP:-127.0.0.1}:${PORT:-8097}:8080']
+    command: [python, app.py, api]
+  sync:
+    <<: *app
+    networks: [internal, outbound]
+    environment:
+      <<: *env
+      SYNC_SECONDS: '21600'
+      FULL_DAYS: '30'
+    command: [python, app.py, sync]
+networks:
+  internal: {internal: true}
+  outbound: {}

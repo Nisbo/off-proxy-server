@@ -1,0 +1,34 @@
+name: Tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8.0
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'"
+          --health-interval 10s --health-timeout 10s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements-dev.txt
+      - name: Unit, local HTTP and management tests
+        run: python -m pytest -q
+      - name: Real MongoDB integration tests
+        run: python -m pytest -q test_app.py
+        env:
+          MONGO_TEST_URI: mongodb://127.0.0.1:27017/
+      - name: Shell and Compose validation
+        run: |
+          bash -n off-proxy install.sh
+          docker compose --env-file .env.example config --quiet
+      - name: Build application image
+        run: |
+          docker build -t off-proxy-server:test .
+          docker run --rm off-proxy-server:test python -c 'import app; print(app.VERSION)'

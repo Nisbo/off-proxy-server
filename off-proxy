@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# Project-scoped Docker management. Runtime data never lives in a release folder.
+set -Eeuo pipefail
+
+ROOT=${OFF_PROXY_DIR:-/opt/off-proxy-server}
+BIN_DIR=${OFF_PROXY_BIN_DIR:-/usr/local/bin}
+LEGACY_DIR=${OFF_PROXY_LEGACY_DIR:-/opt/off-local-api}
+TEMP=
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+require_root() { [[ $(id -u) == 0 ]] || die 'Run as root / Als root ausführen.'; }
+prerequisites() {
+  local tool
+  for tool in docker curl tar flock; do command -v "$tool" >/dev/null || die "Missing command: $tool"; done
+  docker compose version >/dev/null
+}
+cleanup() {
+  if [[ -n $TEMP && $TEMP == "$ROOT"/.stage.* && -d $TEMP ]]; then rm -rf -- "$TEMP"; fi
+}
+trap cleanup EXIT
+
+validate_root() {
+  [[ $ROOT == /* && $ROOT != / && $ROOT != /opt && $ROOT != *$'\n'* ]] || die 'Invalid installation directory.'
+}
+lock_operation() {
+  exec 9>"$ROOT/.state/operation.lock"
+  flock -n 9 || die 'Another install/update is running.'
+}
+load_state() {
+  validate_root
+  [[ -f $ROOT/.state/managed && -f $ROOT/.env ]] || die 'Not installed. Run install.sh first.'
+  RUNTIME=$(cat "$ROOT/.state/runtime")
+  PROJECT=$(cat "$ROOT/.state/project")
+  [[ $RUNTIME == /* && -d $RUNTIME ]] || die 'Runtime directory unavailable.'
+  [[ $PROJECT =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die 'Invalid Compose project name.'
+}
+source_for() {
+  [[ $1 == legacy || $1 =~ ^[a-f0-9]{40}$ ]] || die 'Invalid saved release identifier.'
+  printf '%s/releases/%s' "$ROOT" "$1"
+}
+current_source() {
+  [[ -f $ROOT/.state/current ]] || die 'No active release.'
+  source_for "$(cat "$ROOT/.state/current")"
+}
+version_for() {
+  local version
+  version=$(cat "$1/VERSION")
+  [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'Invalid source VERSION.'
+  printf '%s' "$version"
+}
+compose_at() {
+  local source=$1; shift
+  OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$(basename "$source") \
+    docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
+      -p "$PROJECT" -f "$source/compose.yaml" "$@"
+}
+compose_current() { compose_at "$(current_source)" "$@"; }
+
+check_import_idle() {
+  local source=$1 result=0 running
+  running=$(compose_at "$source" ps --status running -q sync)
+  [[ -n $running ]] || return 0
+  compose_at "$source" exec -T api python -c '
+import os, sys
+from pymongo import MongoClient
+db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
+busy=[s["_id"] for s in db.state.find({"phase":{"$in":["full_import","delta_import"]}})]
+if busy: print("Import active / Import läuft: " + ", ".join(busy), file=sys.stderr)
+sys.exit(75 if busy else 0)' || result=$?
+  [[ $result == 0 ]] || die 'Update deferred. Wait for the import to finish; nothing restarted.'
+}
+
+fetch_release() {
+  TEMP=$(mktemp -d "$ROOT/.stage.XXXXXX")
+  curl -fsSL --retry 2 --connect-timeout 15 --max-time 90 \
+    https://api.github.com/repos/Nisbo/off-proxy-server/commits/main -o "$TEMP/commit.json"
+  RELEASE=$(sed -nE 's/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/p' "$TEMP/commit.json" | head -n 1)
+  [[ $RELEASE =~ ^[a-f0-9]{40}$ ]] || die 'GitHub did not return a valid commit.'
+  if [[ ! -d $ROOT/releases/$RELEASE ]]; then
+    curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 \
+      "https://codeload.github.com/Nisbo/off-proxy-server/tar.gz/$RELEASE" -o "$TEMP/source.tar.gz"
+    mkdir "$TEMP/source"
+    tar -xzf "$TEMP/source.tar.gz" --no-same-owner --no-same-permissions \
+      --strip-components=1 -C "$TEMP/source"
+    [[ -f $TEMP/source/app.py && -f $TEMP/source/compose.yaml && -f $TEMP/source/off-proxy ]] || die 'Incomplete source archive.'
+    version_for "$TEMP/source" >/dev/null
+    mv "$TEMP/source" "$ROOT/releases/$RELEASE"
+  fi
+  cleanup; TEMP=
+}
+
+wait_api() {
+  local source=$1 expected=$2 attempt
+  for attempt in {1..15}; do
+    if compose_at "$source" exec -T api python -c '
+import json, os, sys, urllib.request
+r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+os.environ["API_TOKEN"]})
+with urllib.request.urlopen(r,timeout=5) as response:
+    sys.exit(0 if json.load(response)["version"]==sys.argv[1] else 1)' "$expected" >/dev/null 2>&1; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+write_pointer() {
+  printf '%s\n' "$2" > "$ROOT/.state/$1.new"
+  mv "$ROOT/.state/$1.new" "$ROOT/.state/$1"
+}
+install_command() {
+  local source=$1
+  if [[ -f $source/off-proxy ]]; then
+    install -m 700 "$source/off-proxy" "$ROOT/off-proxy.new"
+    mv "$ROOT/off-proxy.new" "$ROOT/off-proxy"
+  fi
+  [[ -f $ROOT/off-proxy ]] || die 'Management command missing.'
+  mkdir -p "$BIN_DIR"
+  {
+    printf '#!/usr/bin/env bash\nexport OFF_PROXY_DIR=%q\nexec %q "$@"\n' "$ROOT" "$ROOT/off-proxy"
+  } > "$BIN_DIR/off-proxy.new"
+  chmod 700 "$BIN_DIR/off-proxy.new"
+  mv "$BIN_DIR/off-proxy.new" "$BIN_DIR/off-proxy"
+}
+
+activate() {
+  local next=$1 old=${2:-} source expected
+  source=$(source_for "$next")
+  expected=$(version_for "$source")
+  compose_at "$source" config --quiet
+  [[ -z $old ]] || check_import_idle "$(source_for "$old")"
+  # Build first so a failed download/build cannot stop the existing service.
+  compose_at "$source" build api
+  [[ -z $old ]] || check_import_idle "$(source_for "$old")"
+  if [[ -n $old ]]; then compose_at "$(source_for "$old")" stop sync; fi
+  local result=0
+  compose_at "$source" up -d --no-build || result=$?
+  if [[ $result != 0 ]] || ! wait_api "$source" "$expected"; then
+    if [[ -n $old ]]; then
+      printf 'Activation failed; restoring previous services.\n' >&2
+      compose_at "$(source_for "$old")" up -d --no-build || true
+    else
+      # Prevent a failed first activation from leaving an uncontrolled import.
+      compose_at "$source" stop sync || true
+    fi
+    die 'New API failed to start. Data and credentials retained; inspect Docker logs.'
+  fi
+  [[ -z $old || $next == "$old" ]] || write_pointer previous "$old"
+  write_pointer current "$next"
+  install_command "$source"
+  printf 'OFF Proxy Server %s ready. Import/update runs in the background.\n' "$expected"
+}
+
+prepare_install() {
+  validate_root
+  if [[ -e $ROOT && ! -f $ROOT/.state/managed ]]; then die "Directory already exists: $ROOT"; fi
+  umask 077
+  mkdir -p "$ROOT/.state" "$ROOT/releases"
+  lock_operation
+  if [[ -f $ROOT/.state/managed ]]; then load_state; return; fi
+  if [[ -f $LEGACY_DIR/app.py && -f $LEGACY_DIR/compose.yaml && -f $LEGACY_DIR/.env ]]; then
+    RUNTIME=$LEGACY_DIR; PROJECT=off-local-api
+    mkdir "$ROOT/releases/legacy"
+    local name version
+    for name in app.py compose.yaml Dockerfile requirements.txt; do
+      cp -p "$RUNTIME/$name" "$ROOT/releases/legacy/$name"
+    done
+    version=$(sed -nE 's/^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/p' "$RUNTIME/app.py")
+    [[ $version =~ ^0\.1\.[012]$ ]] || die 'Unknown prototype version. No existing services changed.'
+    printf '%s\n' "$version" > "$ROOT/releases/legacy/VERSION"
+    # Normalize only the backup's build context for rollback. Runtime paths stay old.
+    sed 's/^  build: \.$/  build:\n    context: ${OFF_PROXY_SOURCE_DIR:-.}/' \
+      "$RUNTIME/compose.yaml" > "$ROOT/releases/legacy/compose.yaml"
+    printf '*\n!app.py\n!Dockerfile\n!requirements.txt\n' > "$ROOT/releases/legacy/.dockerignore"
+    cp -p "$RUNTIME/.env" "$ROOT/.env"
+    write_pointer current legacy
+    printf 'Existing prototype detected: using %s; database and token preserved.\n' "$RUNTIME"
+  else
+    RUNTIME=$ROOT; PROJECT=off-proxy-server
+    if [[ -n $(docker ps -aq --filter label=com.docker.compose.project="$PROJECT") ]]; then
+      die 'A Docker project with this name already exists.'
+    fi
+    local token
+    token=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+    printf 'BIND_IP=127.0.0.1\nPORT=8097\nAPI_TOKEN=%s\n' "$token" > "$ROOT/.env"
+    mkdir -p "$ROOT/data" "$ROOT/configdb"
+  fi
+  chmod 600 "$ROOT/.env"
+  printf '%s\n' "$RUNTIME" > "$ROOT/.state/runtime"
+  printf '%s\n' "$PROJECT" > "$ROOT/.state/project"
+  printf '1\n' > "$ROOT/.state/managed"
+}
+
+status_command() {
+  compose_current exec -T api python -c '
+import json, os, urllib.request
+r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+os.environ["API_TOKEN"]})
+with urllib.request.urlopen(r,timeout=10) as response:
+    print(json.dumps(json.load(response),ensure_ascii=False,indent=2))'
+}
+test_command() {
+  local code=${1:-4062139025398} kind=${2:-all}
+  [[ $code =~ ^[0-9]+$ ]] || die 'Numeric barcode required.'
+  [[ $kind =~ ^(food|beauty|petfood|product|all)$ ]] || die 'Invalid product type.'
+  compose_current exec -T api python -c '
+import json, os, sys, urllib.request, urllib.error
+url="http://127.0.0.1:8080/api/v3/product/"+sys.argv[1]+".json?product_type="+sys.argv[2]+"&fields=code,product_name,product_name_de,product_name_en,brands,quantity,image_front_thumb_url,product_type"
+req=urllib.request.Request(url,headers={"Authorization":"Bearer "+os.environ["API_TOKEN"]})
+try:
+    with urllib.request.urlopen(req,timeout=10) as response: print(json.dumps(json.load(response),ensure_ascii=False,indent=2))
+except urllib.error.HTTPError as error:
+    print(error.code,error.read().decode()); sys.exit(1)' "$code" "$kind"
+}
+
+main() {
+  local action=${1:-help} old next
+  if [[ $action == help || $action == --help ]]; then
+    printf 'off-proxy install|update|rollback|start|stop|down|status|logs|test [EAN] [type]\n'
+    return
+  fi
+  require_root; prerequisites
+  if [[ $action == install ]]; then
+    ROOT=${2:-$ROOT}; prepare_install
+    old=$(cat "$ROOT/.state/current" 2>/dev/null || true)
+    [[ -z $old ]] || check_import_idle "$(source_for "$old")"
+    fetch_release
+    if [[ $old == "$RELEASE" ]]; then install_command "$(source_for "$old")"; printf 'Already current.\n'; return; fi
+    activate "$RELEASE" "$old"
+    return
+  fi
+  load_state
+  case "$action" in
+    update)
+      lock_operation; old=$(cat "$ROOT/.state/current")
+      check_import_idle "$(source_for "$old")"
+      fetch_release
+      if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
+      activate "$RELEASE" "$old" ;;
+    rollback)
+      lock_operation; old=$(cat "$ROOT/.state/current")
+      [[ -f $ROOT/.state/previous ]] || die 'No previous release saved.'
+      next=$(cat "$ROOT/.state/previous")
+      activate "$next" "$old" ;;
+    start) lock_operation; compose_current up -d --no-build ;;
+    stop) lock_operation; compose_current stop ;;
+    down) lock_operation; compose_current down ;;
+    status) status_command ;;
+    logs) compose_current logs -f --tail 40 sync ;;
+    test) test_command "${2:-4062139025398}" "${3:-all}" ;;
+    *) die "Unknown command: $action" ;;
+  esac
+}
+main "$@"
