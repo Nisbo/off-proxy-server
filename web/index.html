@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.8">
-  <script defer src="/assets/dashboard.js?v=0.1.8"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.9">
+  <script defer src="/assets/dashboard.js?v=0.1.9"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.8</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.9</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -30,7 +30,6 @@
       </form>
     </section>
     <div id="dashboard-content" hidden>
-    <aside class="notice"><span aria-hidden="true">!</span><p data-i18n="warning">Early development · Test use only. Keep backups before updates.</p></aside>
     <section class="overview" aria-label="Overview">
       <div class="stat"><span data-i18n="records">Published records</span><strong id="total-records">—</strong><small data-i18n="recordHint">All available datasets · metadata count</small></div>
       <div class="stat"><span data-i18n="storage">MongoDB storage</span><strong id="storage">—</strong><small data-i18n="storageHint">Data + indexes, including ongoing imports</small></div>

@@ -42,9 +42,9 @@ class Security:
     def __init__(self, db, bootstrap_token):
         self.db = db
         self.login_lock = threading.Lock()
-        db.security.update_one({'_id': 'admin'}, {'$setOnInsert': {
-            'password_hash': None, 'epoch': secrets.token_hex(16), 'idle_minutes': 30,
-            'api_auth_required': True, 'api_token': bootstrap_token}}, upsert=True)
+        defaults = dict(password_hash=None, epoch=secrets.token_hex(16), idle_minutes=30,
+                        api_auth_required=True, api_token=bootstrap_token)
+        db.security.update_one({'_id': 'admin'}, {'$setOnInsert': defaults}, upsert=True)
         db.sessions.create_index('expires_at', expireAfterSeconds=0)
         db.auth_limits.create_index('expires_at', expireAfterSeconds=0)
 

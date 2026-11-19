@@ -28,7 +28,7 @@ from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
 import security
 
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -84,10 +84,19 @@ def save_product(collection, product):
     return indexed
 
 
+class HTTPSRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        if urllib.parse.urlsplit(new_url).scheme != "https":
+            raise ValueError("Export redirect must use HTTPS")
+        return super().redirect_request(request, fp, code, message, headers, new_url)
+
+
 def open_url(url):
+    if urllib.parse.urlsplit(url).scheme != "https":
+        raise ValueError("Export download must use HTTPS")
     request = urllib.request.Request(url, headers={
         "User-Agent": f"Nisbo-OFF-Local-API/{VERSION}", "Accept-Encoding": "identity"})
-    return urllib.request.urlopen(request, timeout=90)
+    return urllib.request.build_opener(HTTPSRedirects()).open(request, timeout=90)
 
 
 def export_url(kind):
@@ -203,11 +212,21 @@ def full_import(db, kind):
         published = True
         # Readers retry the pointer if an old generation disappeared mid-request.
         if old.get("collection") and old["collection"] != stage:
-            db.drop_collection(old["collection"])
+            try:
+                db.drop_collection(old["collection"])
+            except PyMongoError:
+                LOG.warning("%s: old snapshot retained after successful publication", kind)
         LOG.info("%s: published %s products", kind, count)
     finally:
         if not published:
-            db.drop_collection(stage)
+            # A lost acknowledgement can mean publication succeeded despite an exception.
+            # Never remove a generation unless its unpublished state can be established.
+            try:
+                current = db.state.find_one({"_id": kind}) or {}
+                if current.get("collection") != stage:
+                    db.drop_collection(stage)
+            except PyMongoError:
+                LOG.warning("%s: cleanup deferred until the published pointer can be verified", kind)
 
 
 def parse_deltas(text, project):
@@ -307,6 +326,9 @@ def sync_one(db, kind):
         if approved or (options["full_import_policy"] == "automatic" and full_reasons(state, options)):
             full_import(db, kind)
             imported = True
+            if approved:
+                control.finish(db, "full:" + kind)
+                approved = None
         elif not state.get("ready"):
             db.state.update_one({"_id": kind}, {"$set": {
                 "phase": "needs_full_import", "full_reasons": ["initial"]}}, upsert=True)
@@ -330,20 +352,24 @@ def sync_one(db, kind):
 
 def sync_loop(db, once=False):
     interval = max(60, int(os.environ.get("SYNC_SECONDS", "21600")))
-    # A process restart never silently reauthorizes an interrupted full import.
-    db.requests.update_many({"status": "running"}, {"$set": {
-        "status": "failed", "error": "Worker restarted; request again", "finished_epoch": time.time()}})
-    db.state.update_many({"phase": {"$in": ["full_import", "delta_import"]}}, {"$set": {
-        "phase": "error", "error": "Worker restarted; interrupted import retained no completion marker",
-        "error_at": timestamp()}})
+    recovering = True
     try:
         while not STOP.is_set():
+            if not control.begin_cycle(db, {
+                    "cycle_started_at": timestamp(), "heartbeat_epoch": time.time(),
+                    "next_check_epoch": None, "active_kind": None, "sync_seconds": interval}):
+                STOP.wait(2)
+                continue
+            if recovering:
+                # A process restart never silently reauthorizes an interrupted full import.
+                db.requests.update_many({"status": "running"}, {"$set": {
+                    "status": "failed", "error": "Worker restarted; request again", "finished_epoch": time.time()}})
+                db.state.update_many({"phase": {"$in": ["full_import", "delta_import"]}}, {"$set": {
+                    "phase": "error", "error": "Worker restarted; interrupted import retained no completion marker",
+                    "error_at": timestamp()}})
+                recovering = False
             db.requests.update_one({"_id": "sync"}, {"$set": {
                 "status": "running", "started_epoch": time.time(), "error": None}}, upsert=True)
-            db.scheduler.update_one({"_id": "sync"}, {"$set": {
-                "phase": "running", "cycle_started_at": timestamp(), "heartbeat_epoch": time.time(),
-                "next_check_epoch": None, "active_kind": None,
-                "sync_seconds": interval}}, upsert=True)
             failed = False
             for kind in ORDER:
                 if STOP.is_set():
@@ -493,7 +519,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; "
                          "connect-src 'self'; img-src 'self' data: https://images.openfoodfacts.org "
                          "https://images.openbeautyfacts.org https://images.openpetfoodfacts.org "
-                         "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+                         "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
         self.send_header("X-Data-Attribution", "Open Food Facts contributors; ODbL-1.0")
         self.end_headers()
         self.wfile.write(body)
@@ -541,7 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             code = params.get("ean", [""])[0]
             kind = params.get("product_type", ["all"])[0]
             language = params.get("lc", ["en"])[0]
-            if (set(params) - {"ean", "lc", "product_type"} or not re.fullmatch(r"[0-9]{1,256}", code)
+            if (set(params) - {"ean", "lc", "product_type"} or any(len(v) != 1 for v in params.values()) or not re.fullmatch(r"[0-9]{1,256}", code)
                     or kind not in (*PROJECTS, "all") or language not in ("de", "en")):
                 self.send_json(400, {"error": "invalid_lookup"})
                 return True
@@ -553,7 +579,11 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
-        parsed = urllib.parse.urlsplit(self.path)
+        try:
+            parsed = urllib.parse.urlsplit(self.path)
+        except ValueError:
+            self.send_json(400, {"error": "invalid_request"})
+            return
         try:
             if self.public_dashboard(parsed):
                 return
@@ -568,7 +598,6 @@ class Handler(BaseHTTPRequestHandler):
             if not public_product and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected.encode()):
                 self.send_json(401, {"error": "authentication_required"})
                 return
-            parsed = urllib.parse.urlsplit(self.path)
             if parsed.path == "/health":
                 states = {state.pop("_id"): state for state in self.server.db.state.find({})}
                 for kind in PROJECTS:
@@ -584,8 +613,11 @@ class Handler(BaseHTTPRequestHandler):
             if not match:
                 self.send_json(404, {"error": "unsupported_endpoint"})
                 return
+            if len(match[1]) > 256:
+                self.send_json(400, {"error": "invalid_barcode"})
+                return
             params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-            if set(params) - {"fields", "product_type", "lc"}:
+            if set(params) - {"fields", "product_type", "lc"} or any(len(v) != 1 for v in params.values()):
                 self.send_json(400, {"error": "unsupported_parameters"})
                 return
             kind = params.get("product_type", ["food"])[0]
@@ -666,7 +698,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(503, {"error": "database_unavailable"})
 
     def log_message(self, fmt, *args):
-        LOG.info(fmt, *args)
+        # Query strings may contain accidentally pasted credentials; never log them.
+        LOG.info("%s %r", getattr(self, "command", "HTTP"), self.path.split("?", 1)[0])
 
 
 def main():
@@ -694,7 +727,7 @@ def main():
     token = os.environ.get("API_TOKEN", "")
     if len(token) < 24:
         raise SystemExit("API_TOKEN must contain at least 24 characters")
-    Server(("0.0.0.0", 8080), db, token).serve_forever()
+    Server(("0.0.0.0", 8080), db, token).serve_forever()  # nosec B104 # Container listener; host binding is controlled by BIND_IP.
 
 
 if __name__ == "__main__":

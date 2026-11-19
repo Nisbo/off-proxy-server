@@ -122,29 +122,6 @@ h3 {
   color:var(--muted);
   font-variant-numeric:tabular-nums;
 }
-.notice {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  border:1px solid #5f4c31;
-  background:#302a22;
-  color:#f0cf9d;
-  border-radius:12px;
-  padding:13px 16px;
-  margin-bottom:24px;
-  line-height:1.5;
-  font-size:.88rem;
-}
-.notice>span {
-  border:1px solid #c49b5e;
-  border-radius:50%;
-  width:23px;
-  height:23px;
-  display:grid;
-  place-items:center;
-  flex-shrink:0;
-  font-weight:700;
-}
 .overview {
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
@@ -507,10 +484,6 @@ footer {
   h1 {
     font-size:1.2rem;
     letter-spacing:-.03em;
-  }
-  .notice {
-    font-size:.76rem;
-    padding:11px;
   }
   .overview {
     gap:10px;

@@ -1,258 +1,220 @@
-> **Warning: Early development — do not use in production yet. Updates may fail, interrupt imports or cause unexpected errors. Use only in a test environment with backups.**
+> **Warning: Early development — do not use in production yet. Updates may fail. Use a separate test installation and keep backups.**
 
 # OFF Proxy Server
 
-[Deutsch](README.de.md) · [GitHub](https://github.com/Nisbo/off-proxy-server)
+[Deutsch](README.de.md) · [GitHub](https://github.com/Nisbo/off-proxy-server) · [Changes](CHANGELOG.md)
 
-A small self-hosted product lookup API backed by a local MongoDB mirror of the
-Open Food Facts family of databases. Built for barcode scans and applications
-such as HA List Manager. **Early version; API compatibility is limited to product
-lookup, not the entire Open Food Facts API.**
+A self-hosted barcode lookup API with a local mirror of **Open Food Facts,
+Open Beauty Facts, Open Pet Food Facts and Open Products Facts**. The complete
+exported product documents are retained; images remain remote URLs.
 
-## What works
+The project provides product-by-barcode lookups, not the entire OFF API.
+It currently has no name search, product editing, public dashboard search or
+online fallback for unknown products. HA List Manager integration is not yet included.
 
-- Preserve complete exported product documents from Open Food Facts, Open Beauty
-  Facts, Open Pet Food Facts and Open Products Facts. Images remain remote URLs.
-- Indexed barcode lookup: `/api/v3/product/<barcode>.json` with `product_type`,
-  simple `fields` selection and `lc` for selected image URLs.
-- Check daily delta files every six hours; manual synchronization from the dashboard.
-- Full imports require confirmation by default; regular full refreshes are disabled.
-- Atomic full-dataset publication, replayable deltas, older-version protection,
-  detection of missing delta intervals and optional full refreshes for deletions.
-- Retain source records without barcodes, report them separately, and never
-  fabricate an EAN. Preserve leading zeros and nonstandard source identifiers.
-- Token-protected API on localhost by default; MongoDB has no published port.
-- Public test dashboard with dataset statistics, live import progress, next synchronization times and EAN lookup across all datasets.
-- Install, update, status, logs, product test, stop/start and rollback commands.
+## Before installing
 
-There is **no product editing, search-by-name API or automatic online lookup for
-unknown barcodes yet**. User-written product records are not planned. A future
-optional upstream fallback will fetch and cache products found at OFF.
+- Linux, Bash, Docker Engine with Docker Compose v2, curl, tar and util-linux (`flock`).
+  Run installation and management as root. The installer does not install Docker
+  or OS packages. Host Python, pip, Git and a separate web server are unnecessary.
+- MongoDB 8 needs a supported CPU; x86-64 hosts require AVX.
+- A useful starting point is 2 CPU cores and 2–4 GiB RAM available to these services.
+  The configured container memory limits total about 2 GiB, excluding the host.
+- In one deployment, about five million products used **36 GiB on disk** and
+  approximately 1 GiB RAM after import. Allow room for both old and replacement
+  datasets: roughly 80–100 GiB free was a reasonable reserve at that observed size.
+  These are measurements, not size guarantees. Docker images, backups and growth
+  require additional room. CPU limits do not limit disk I/O.
 
-## Requirements
+## Install and sign in
 
-Linux with Bash, Docker Engine, Docker Compose v2, curl, tar and util-linux
-(`flock`). Root is required for Docker and installing the management command.
-No Python, pip, Git, external database or web server is needed on the host.
-MongoDB 8 requires a compatible CPU; x86-64 hosts need AVX support.
-
-Start with approximately 2 CPU cores and 2–4 GiB RAM available to the services.
-In one low-traffic deployment, about five million complete product records used
-36 GiB of disk and roughly 1 GiB RAM after import. This is an observation, not a
-guarantee. Allow space for a second dataset during full replacement; about
-80–100 GiB free before a full import provides headroom at that observed size.
-Images, Docker images, backups and future data growth need separate space.
-CPU limits do not cap disk I/O. First import may take hours and continues after
-the shell closes, once installation has returned successfully.
-
-## Install
-
-As root:
+In a root **Bash** shell:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
+set -o pipefail
+curl -fsSL --proto '=https' https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
 ```
 
-You may inspect [install.sh](install.sh) and [off-proxy](off-proxy) before running
-them. The installer downloads a commit-specific source archive from this
-repository, builds the application image once, and starts an isolated Compose
-project. It does not run apt or change unrelated containers.
-
-New installations use `/opt/off-proxy-server`. A random API token is generated
-in `.env`, with mode 600. Data and config stay outside versioned source folders.
-The latest main commit is the update channel; there are no stable releases yet.
-
-### Existing `/opt/off-local-api` prototype
-
-The same install command recognizes prototype versions 0.1.0–0.1.2 automatically:
-
-- Existing MongoDB files remain in `/opt/off-local-api/data` and `configdb`.
-- The existing Compose project `off-local-api` is retained.
-- API token, address and port are copied unchanged into the new management `.env`.
-- Original files remain untouched and a legacy source snapshot enables rollback.
-- No second database is created and no full import is triggered merely by migration.
-  Normal scheduled synchronization still applies.
-- An active full/delta import defers migration before any service is stopped.
-
-After migration use **`off-proxy` instead of the old `manage.sh`**. In particular,
-do not start a second stack from the old Compose file. The old `.env` is retained
-as a historical copy; subsequent settings belong to `/opt/off-proxy-server/.env`.
-
-## Commands
-
-```sh
-off-proxy status                       # dataset state; no credentials printed
-off-proxy logs                         # Ctrl+C exits the viewer only
-off-proxy test 0000527000057 beauty     # known cosmetic example, availability may change
-off-proxy test 4062139025398 food       # food example
-off-proxy update                       # latest main; preserves config and database
-off-proxy rollback                     # previous source version, same data
-off-proxy stop                         # stop services; preserve data
-off-proxy start                        # start existing version
-off-proxy down                         # remove project containers/networks; preserve data
-```
-
-Updates download/build before stopping existing services, check for active imports,
-and verify the new API version. A failed activation attempts to restart the old
-version. Rollback restores software, **not a database backup**; no destructive
-database schema changes are made by this version. Releases are kept locally for
-rollback. If main has not changed, update does not restart services.
-
-The installer/update command must finish before closing the shell. Approved
-imports then run independently in the background. An interrupted unfinished full import
-needs a new confirmation and restarts from the beginning; completed datasets remain published.
-On a fresh installation, open the dashboard and confirm the initial import for each dataset.
-
-## Protected dashboard and API access
-
-Open `http://<BIND_IP>:8097/` after updating. A browser running directly on the
-server can use `http://127.0.0.1:8097/`. The dashboard supports English and German;
-the language selection is retained locally in the browser.
-
-The dashboard is locked until you set an administrator password. Fresh interactive
-installations ask for a password twice in the terminal; there is no generated
-setup code. After upgrading an existing installation, or to reset the password:
+The installer asks twice for your own **8–256 character** administrator password.
+Input and pasted text remain hidden; there is no generated setup code. If no
+interactive terminal is available, the GUI stays locked. Set/reset the password with:
 
 ```sh
 off-proxy password
 ```
 
-The entry is hidden (including pasted text) and is passed on stdin, never as a
-command argument. Use 8–256 characters. Until setup is complete, existing API
-clients and synchronization continue, but no dashboard data or controls are
-available without a session. There is no public GUI search in this version.
+The installation directory is `/opt/off-proxy-server`. The bootstrap and application
+archive are pinned to the same GitHub commit. Only runtime files are installed;
+tests, CI configuration and development tools are excluded. The application runs
+without root privileges inside its containers. MongoDB publishes no host port.
+No unrelated containers or databases are changed.
 
-**Access & API** provides:
+By default the HTTP listener is available **only on the server itself**, at
+`http://127.0.0.1:8097/`. To use another computer, edit `BIND_IP` in
+`/opt/off-proxy-server/.env` to the server's specific LAN/VPN address, then run
+`off-proxy start`. `PORT` defaults to `8097`. `0.0.0.0` deliberately exposes all
+IPv4 interfaces; prefer a specific address and restrict network access.
+Change bindings outside active imports because Compose may recreate containers.
 
-- Inactivity timeout: 30 minutes (default), 8 hours, a custom duration, or no
-  inactivity timeout. Status polling does not keep sessions alive; user activity
-  does. Cookies persist across browser restarts, with a one-year maximum lifetime.
-- Sign out, sign out all sessions, and change the password using the current
-  password. A password change or terminal reset revokes all sessions.
-- Reveal/hide the stored API key with the eye or copy it while hidden. Set your
-  own 24–256 character key or generate a new one. Confirm and save the change;
-  the old key stops working immediately, including for existing API clients.
-- Require an API key (default), or explicitly confirm keyless **product API**
-  lookups. Statistics, GUI lookup, settings, import controls and `/health` are
-  never made public by that switch.
+Open `http://<server-address>:8097/`, sign in and confirm **Full import…** for each
+desired dataset. There is no automatic initial full import. The first food import
+can take hours. Once the installation command has finished, the importer runs in
+the background and does not depend on the shell or browser remaining open.
 
-Existing product data, synchronization settings and API keys are retained.
-`API_TOKEN` in `.env` bootstraps the persistent access record on first start only.
-After rotation, the current key is stored recoverably in MongoDB so an authenticated
-administrator can reveal it. Status/update/test commands read the current key;
-`.env` remains unchanged. A rollback to software before 0.1.7 uses its original
-`.env` key again and does not provide this GUI protection.
+## Everyday commands
 
-Passwords use a salted PBKDF2-HMAC-SHA256 hash with 600,000 iterations. Session
-tokens are random, stored only as hashes, and sent in HttpOnly, SameSite=Strict
-cookies. Failed logins are rate-limited persistently. Controls require a session
-and CSRF token. These choices follow the [OWASP password guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-and [session guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+| Command | Purpose |
+| --- | --- |
+| `off-proxy status` | Version and dataset status |
+| `off-proxy logs` | Follow synchronization logs; Ctrl+C closes only the view |
+| `off-proxy test 4062139025398 all` | Query a product across all available datasets |
+| `off-proxy password` | Set/reset the GUI password and revoke all sessions |
+| `off-proxy update` | Download and activate the current `main` commit |
+| `off-proxy rollback` | Return to the previous locally retained software version |
+| `off-proxy stop` / `off-proxy start` | Stop/start this installation; retain data |
+| `off-proxy down` | Remove only this project's containers/networks; retain data |
 
-Use HTTPS for domain access. The reverse proxy must set `X-Forwarded-Proto: https`
-for Secure cookies and overwrite client-supplied forwarded headers. Direct plain
-HTTP remains supported for trusted local test networks; it does not encrypt the
-password or product traffic. No password or API key belongs in a URL.
-Product editing is not available. Import controls use the existing single worker.
+There are currently **no stable/beta update channels or unattended updates**.
+Manual updates follow `main`; separate release channels are still to be designed.
+A repeated update to the same commit does not rebuild or restart services.
 
-Progress shows processed records and compressed download bytes when a content
-length is available. A full first import has no known total record count, so no
-record percentage is invented. The next synchronization is recorded by the actual
-worker at cycle completion. An optional full-refresh date is a due date, checked
-on a subsequent synchronization cycle; it does not override confirmation
-requirements. Missing or overdue worker reports are indicated.
-Statistics use MongoDB metadata and a 30-second cache, not full product scans.
-The storage value includes allocated data and indexes (and ongoing import
-collections), excluding journal/filesystem overhead. It may differ from `du`.
+Updates build the replacement image before stopping services, defer during active
+imports, and verify the API version after activation. The worker's cycle start
+and updater share a temporary maintenance gate. Failed activation attempts to
+restore the previous services. An interrupted updater's gate expires within ten
+minutes. This gate requires the updated worker; old prototypes do not implement it.
+Existing data, passwords, API keys, bindings and settings are retained.
 
-The first update installs the dashboard without reimporting existing datasets.
-Progress starts being recorded by the updated worker on its next import.
+**Rollback restores software, not a database backup.** Returning to versions before
+0.1.7 also removes GUI protection and uses the original `.env` API key again.
 
-## API example
+## Dashboard and access
 
-On the server, with an imported cosmetic dataset:
+The GUI supports German and English and remembers the language in the browser.
+Its statistics, lookup and controls require administrator sign-in.
+
+- **Refresh display** reloads status only. Metadata product counts may be cached
+  for 30 seconds; storage includes allocated data/indexes, not all filesystem overhead.
+- **Synchronize now** requests a delta check. Repeated clicks are coalesced;
+  the single worker handles the request when it is available.
+- **Full import…** first opens a confirmation. Download and decompression stream
+  into a separate collection. Only a completed, validated import replaces the
+  published pointer; the previous copy is removed afterward. A failure before
+  publication retains the old data. Temporarily, both copies require disk space.
+- **Settings** controls gap handling, full-import confirmation and optional intervals.
+  Defaults: continue available deltas, require full-import confirmation, interval `0`
+  (disabled). Automatic full imports require separate explicit consent.
+- **Access & API** controls inactivity expiry (30 minutes by default, 8 hours,
+  custom or disabled), password changes, and signing out all sessions. Status
+  polling does not extend a session; actual interaction does. Cookies can persist
+  for up to one year. Password changes and terminal resets revoke every session.
+
+Full imports that are interrupted or fail before publication need another
+confirmation under the default policy. A later delta-source failure does not
+turn a successfully completed full import into a failed full-import request.
+An empty snapshot or a record-count decrease exceeding 25% is rejected for review.
+
+Use the eye to reveal/hide the saved API key, or **Copy** while it is hidden.
+You can generate a new key or enter your own 24–256 non-space ASCII characters.
+Only saving applies a change; old clients then need the new key immediately.
+`API_TOKEN` in `.env` bootstraps the access record once. Later key changes are
+stored recoverably in MongoDB; status/update/test commands use that current key.
+
+API authentication is enabled by default. Explicitly enabling keyless access
+opens **only product API lookups**. It never opens GUI lookup, statistics,
+settings, import controls or `/health`. Public GUI search is deferred.
+
+Passwords are salted PBKDF2-HMAC-SHA256 hashes with 600,000 iterations. Random
+session tokens are stored only as hashes; cookies are HttpOnly and SameSite=Strict.
+Controls also require CSRF protection; login attempts are rate-limited persistently.
+Use HTTPS for domain access. The proxy must overwrite client forwarded headers
+and set `X-Forwarded-Proto: https` for Secure cookies. Plain HTTP is supported for
+trusted local test networks but does not encrypt credentials or traffic.
+
+## Product API
+
+A convenient server-side test uses the stored key automatically:
+
+```sh
+off-proxy test 0000527000057 beauty
+```
+
+For curl, copy the current key from the GUI and enter it at the hidden prompt:
 
 ```sh
 read -r -s -p 'Current API key: ' TOKEN
 printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:8097/api/v3/product/0000527000057.json?product_type=beauty&fields=code,product_name,brands,quantity'
+  'http://127.0.0.1:8097/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url'
 unset TOKEN
 ```
 
-Types: `food` (default), `beauty`, `petfood`, `product`, `all`.
-`GET /health` uses the same authentication and reports each dataset.
-`all_ready` means all snapshots exist; `all_synced` additionally means the last
-delta check succeeded for all four sources. An upstream outage can leave one
-source unavailable while the others work. A 503 for an unknown code in an
-incomplete set avoids incorrectly reporting that the product does not exist.
+| Parameter | Supported values |
+| --- | --- |
+| `product_type` | `food` (default), `beauty`, `petfood`, `product`, `all` |
+| `lc` | Language for selected image URLs, e.g. `de` or `en` |
+| `fields` | Comma-separated top-level field names; omitted/`all`/`raw` returns the full document |
 
-Only simple exported fields are supported. This is not an implementation of
-OFF search, write APIs, every computed field, barcode normalization or cross-site
-redirect behavior. It does not automatically add missing products from OFF yet.
-HA List Manager requires a separate server-URL/token option to use this API.
-This repository does not modify Home Assistant.
+Barcodes are digit strings up to 256 characters; leading zeros are retained.
+The response uses the OFF v3 product-result structure. Found products return 200.
+Unknown products return 404 when all requested datasets are available, otherwise
+503. A hit can be returned even if another dataset is not ready. `/health` always
+requires the current API key. `all_ready` means snapshots exist; `all_synced` also
+requires successful delta checks with no known gaps. No general OFF search,
+write API, barcode normalization or full computed-field parity is promised.
+Never put a key or password in a URL.
 
-For access over a VPN/site-to-site connection, set `BIND_IP` to the server's
-specific VPN/LAN address in `/opt/off-proxy-server/.env`, then use `off-proxy start`.
-Do this outside active imports: changing environment settings can recreate services.
-Use VPN transport or HTTPS; avoid publishing the API directly on all interfaces.
+## Deltas and outages
 
-## Synchronization and source outages
+The worker checks every six hours. A transient timeout, HTTP 429 or 5xx keeps the
+file cursor unchanged and is retried on a later check; other datasets continue.
+Interrupted delta files may have applied some product writes but are replayed
+safely. Revision checks prevent older data from overwriting newer products.
 
-All four original JSONL sources are configured. An unavailable source is reported
-and retried. Pet-food source routing has intentionally not been switched to a
-different mirror in this version. Other datasets continue importing independently.
+Coverage is tracked using the start/end timestamps in delta filenames. Missing
+intervals in a successfully loaded index, or listed files returning 404/410, create
+a persistent gap. Available newer deltas continue by default; an optional policy
+pauses newer updates for just that dataset. Existing products remain queryable.
+A returning historical file can close the gap. Otherwise a confirmed full import
+is needed to restore complete coverage. Changes missing inside an apparently
+valid upstream file cannot be detected this way.
 
-The dashboard controls are:
+OFF generally retains about 14 days of deltas and does not supply deletion events.
+A few missed days are caught up if the files remain available. No full import is
+started merely because files have expired: the warning persists and confirmation
+is required by default. Optional full refreshes reconcile deletions as well.
+All source URLs are configured in [app.py](app.py); images are not downloaded.
 
-- **Refresh display:** reload status only. Product counts may be cached for 30 seconds.
-- **Synchronize now:** queue a delta check across all datasets. Repeated requests
-  while queued/running are coalesced. The single worker checks requests every two
-  seconds when idle; a running import finishes first.
-- **Full import…:** explicitly confirm a complete download/rebuild for one dataset.
-  Existing published data remains readable. Failed/interrupted requests are not
-  automatically retried as full imports.
-- **Settings:** choose how to handle delta gaps and full imports. Settings and
-  requests persist in MongoDB, survive updates, and do not modify `.env`.
+## Backups, troubleshooting and removal
 
-Safe defaults, including after upgrading from 0.1.4: continue applying available
-**deltas**, require confirmation for **all full imports**, and disable regular
-full refreshes (interval `0`). Legacy `FULL_DAYS=30` no longer enables automatic
-imports. An optional interval merely marks a refresh as due while confirmation
-is required. Automatic full imports require a separate explicit consent in settings;
-this opt-in covers initial imports, gap recovery and enabled intervals.
+For a consistent filesystem backup, first run `off-proxy stop`. Back up `.env`,
+`.state`, retained source versions and **both MongoDB directories `data` and
+`configdb`**. Start again with `off-proxy start`. The runtime data directory is
+recorded in `/opt/off-proxy-server/.state/runtime`; older migrated installations
+may use `/opt/off-local-api`, which must be backed up separately. Backups contain
+API credentials and password hashes; restrict access and test restoration in a
+separate environment. Software rollback does not replace these backups.
 
-OFF retains approximately 14 days of deltas, without deletion events. A full
-refresh reconciles deletions and permanently missing changes. When continuing
-past a gap, newer products become up to date but products changed only in the
-missing interval may remain outdated; the dataset stays marked as incomplete.
-Optionally pause newer deltas for only the affected dataset instead. Existing
-products and other datasets stay available.
+- GUI locked: run `off-proxy password`, then reload the page.
+- Import error: check `off-proxy status` and `off-proxy logs`; do not delete data.
+- No space left: check host disk usage, including Docker images and import staging.
+- Update deferred: let the active synchronization finish, then retry.
+- GUI reports a delta gap: choose continue/pause; approve a full import when suitable.
+- After an update: reload the browser page; API key changes do not require a restart.
 
-Coverage is determined from the start/end timestamps in delta filenames, not
-from calendar days. A missing interval in a successfully loaded index, or a
-listed file returning HTTP 404/410, is recorded as a persistent gap. HTTP 5xx,
-429 and timeouts alone do **not** establish a gap: the file cursor is retained
-and incomplete files are retried. After three offline days, all still available
-contiguous deltas are replayed. If a missing file reappears, historical deltas
-are replayed to close that gap; revision checks prevent overwriting newer data.
-Otherwise the warning remains until a confirmed full import succeeds. These
-checks cannot detect changes omitted inside an otherwise valid upstream file.
-A >25% snapshot size decrease requires review rather than automatically
-discarding a large part of a published dataset. Full import publication is atomic.
-Delta files advance the cursor only when complete; a failed file may have already
-updated some records, which are safely replayed on the next attempt.
+To remove services, use `off-proxy down`. Delete directories only if you also
+intend to remove their data. There is no global Docker prune or automatic cleanup
+of unrelated images. Retained application images/source versions permit rollback.
 
-## Remove
+## Existing prototype migration
 
-`off-proxy down` removes only this project's containers/networks and keeps data.
-Afterward the installation directory and wrapper can be removed manually.
-For migrated prototypes, the database still resides in `/opt/off-local-api`:
-do not delete it unless you explicitly want to delete the product mirror.
-No command runs a global Docker prune. Images remain cached.
+The installer still recognizes prototypes 0.1.0–0.1.2 under `/opt/off-local-api`.
+It retains the original Compose project, database location and configuration,
+without copying the database or reimporting it. Old source is backed up locally.
+After migration use **only `off-proxy`**, not the old `manage.sh` or Compose file.
+This compatibility path is separate from the normal fresh installation.
 
-## Development
+## Development and verification
 
 ```sh
 python3 -m venv .venv
@@ -260,17 +222,24 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-Unit tests use mongomock; CLI tests simulate GitHub/Docker boundaries and verify
-migration, unchanged data/token, update refusal during imports, failure recovery
-and rollback. Set `MONGO_TEST_URI=mongodb://127.0.0.1:27017/` to run the database
-tests against real MongoDB. Tests create/drop uniquely named test databases only.
-CI runs both modes, validates Compose/shell syntax and builds the Docker image.
+Tests use generated fixtures, never real user product dumps. Set `MONGO_TEST_URI`
+to a disposable MongoDB endpoint for real database tests; only uniquely named
+test databases are created/dropped. CLI tests simulate download/Docker boundaries.
+An additional opt-in Docker smoke test performs actual install, key rotation,
+update and rollback on a disposable Docker host, with local archives and no OFF
+imports. Run it only as root with `DOCKER_SMOKE=1`; it uses port 8097 and the
+`off-proxy-server` Compose project. Never run it on an installed server.
 
-## License and attribution
+CI runs these tests, coverage reporting, Ruff, Bandit, ShellCheck, Compose
+validation and image builds. Runtime dependency audit: `pip-audit -r requirements.txt`.
+Tests and development tools remain in GitHub for reproducibility but are excluded
+from installed releases and the application image. Passing checks are not a
+promise of complete security or full OFF API compatibility.
 
-Project code: [MIT](LICENSE), copyright Nisbo. OFF data is separate from this
-code license: **Open Food Facts contributors**, ODbL for the database and DbCL for
-its contents; product images have their own licensing. See
-[OFF data and reuse terms](https://world.openfoodfacts.org/data).
-No database dump, user secret or API token is distributed in this repository.
-Independent project; not an official Open Food Facts service.
+## License
+
+Code: [MIT](LICENSE), copyright Nisbo. Product data has separate terms:
+**Open Food Facts contributors**, ODbL for the database, DbCL for contents;
+images have their own licenses. See [OFF data and reuse](https://world.openfoodfacts.org/data).
+This is an independent project, not an official OFF service. No product dump,
+private configuration or API credential is distributed in this repository.

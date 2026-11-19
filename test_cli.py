@@ -23,14 +23,17 @@ def installation(tmp_path):
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path / "local-bin"),
                OFF_PROXY_LEGACY_DIR=str(tmp_path / "legacy"),
-               FAKE_REMOTE=str(remote), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40)
+               FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40)
     programs = {
         "id": "#!/bin/sh\necho 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
         "curl": '''#!/usr/bin/env python3
 import json,os,pathlib,shutil,sys
 args=sys.argv[1:];dest=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('https://'))
-if 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['FAKE_RELEASE']},indent=2))
+with open(os.environ['FAKE_LOG']+'.downloads','a') as f:f.write(url+'\\n')
+if 'codeload.github.com' in url and os.environ.get('FAKE_FETCH_FAIL')=='1':sys.exit(22)
+if 'raw.githubusercontent.com' in url:shutil.copyfile(pathlib.Path(os.environ['FAKE_SOURCE'])/'off-proxy',dest)
+elif 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['FAKE_RELEASE']},indent=2))
 else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(os.environ['FAKE_RELEASE']+'.tar.gz'),dest)
 ''',
         "docker": '''#!/usr/bin/env python3
@@ -43,6 +46,7 @@ source=a[a.index('-f')+1]
 if 'ps' in a:
     if os.environ.get('FAKE_RUNNING','1')=='1':print('existing-worker')
     sys.exit(0)
+if 'exec' in a and any('result=db.scheduler.update_one' in x for x in a) and os.environ.get('FAKE_MAINTENANCE_BUSY')=='1':sys.exit(75)
 if 'exec' in a and any('busy=' in x for x in a):sys.exit(75 if os.environ.get('FAKE_BUSY')=='1' else 0)
 if 'exec' in a and any('sys.argv[1]' in x for x in a):
     sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source else 0)
@@ -62,7 +66,7 @@ sys.exit(0)
 
     def archive(release):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "dashboard.py", "control.py", "security.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy"):
+            for name in ("app.py", "dashboard.py", "control.py", "security.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
                 data = (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)
@@ -261,3 +265,68 @@ def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installati
         if not done:
             os.kill(child, signal.SIGKILL)
             os.waitpid(child, 0)
+
+
+def test_runtime_install_excludes_tests_and_development_files(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    source = root/'releases'/('a'*40)
+    assert not (source/'test_app.py').exists()
+    assert not (source/'requirements-dev.txt').exists()
+    assert not (source/'.github').exists()
+    assert (source/'security.py').is_file()
+    assert (source/'web/index.html').stat().st_mode & 0o044 == 0o044
+    assert (source/'web').stat().st_mode & 0o011 == 0o011
+
+
+def test_bootstrap_pins_cli_and_archive_to_one_commit(installation):
+    root, env, log, run = installation
+    result = subprocess.run(['bash', str(SOURCE/'install.sh')], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    downloads = Path(str(log)+'.downloads').read_text().splitlines()
+    assert sum('commits/main' in url for url in downloads) == 1
+    assert any('/'+('a'*40)+'/off-proxy' in url for url in downloads)
+    assert downloads[-1].endswith('/'+('a'*40))
+    assert (root/'.state/current').read_text().strip() == 'a'*40
+
+
+def test_failed_download_leaves_installed_version_and_data_unchanged(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    before = (root/'.env').read_bytes()
+    log.write_text('')
+    assert run('update', FAKE_RELEASE='b'*40, FAKE_FETCH_FAIL='1').returncode != 0
+    assert (root/'.state/current').read_text().strip() == 'a'*40
+    assert (root/'.env').read_bytes() == before
+    assert not any('stop' in call for call in docker_calls(log))
+
+
+def test_racing_cycle_defers_update_after_build_before_stop(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    log.write_text('')
+    result = run('update', FAKE_RELEASE='b'*40, FAKE_MAINTENANCE_BUSY='1')
+    assert result.returncode != 0
+    assert 'deferred' in result.stderr
+    calls = docker_calls(log)
+    assert any('build' in call for call in calls)
+    assert not any('stop' in call for call in calls)
+    assert (root/'.state/current').read_text().strip() == 'a'*40
+
+
+def test_gate_is_acquired_before_stop_and_released_after_success_or_restore(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    for bad in ('@', 'b'*40):
+        log.write_text('')
+        result = run('update', FAKE_RELEASE='b'*40, FAKE_BAD_RELEASE=bad)
+        calls = docker_calls(log)
+        gate = next(i for i, c in enumerate(calls) if any('result=db.scheduler.update_one' in x for x in c))
+        stop = next(i for i, c in enumerate(calls) if 'stop' in c)
+        release = next(i for i, c in enumerate(calls) if any('$unset' in x and 'maintenance_until' in x for x in c))
+        assert gate < stop < release
+        if bad == '@':
+            assert result.returncode == 0
+            assert run('rollback').returncode == 0
+        else:
+            assert result.returncode != 0

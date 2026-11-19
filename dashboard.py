@@ -1,4 +1,4 @@
-"""Public, read-only dashboard data. Never expose API credentials or raw state."""
+"""Sanitized dashboard data for authenticated sessions. Never expose API credentials or raw state."""
 import threading
 import time
 from pathlib import Path

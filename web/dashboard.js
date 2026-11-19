@@ -2,7 +2,7 @@
 (() => {
   const labels = {
     en: {
-      eyebrow: "YOUR LOCAL PRODUCT MIRROR", warning: "Early development · Test use only. Keep backups before updates.",
+      eyebrow: "YOUR LOCAL PRODUCT MIRROR",
       records: "Published records", recordHint: "All available datasets · metadata count", storage: "MongoDB storage", storageHint: "Data + indexes, including ongoing imports",
       nextCheck: "Next synchronization", datasets: "Available datasets", live: "LIVE STATUS", activity: "Synchronization", transfer: "Download", datasetHeading: "Your datasets", refresh: "Refresh display",
       lookupEyebrow: "LOCAL LOOKUP", lookup: "Find a product", lookupHint: "Search by EAN across all four datasets. Leading zeros are preserved. No data is changed.",
@@ -17,7 +17,7 @@
       foundTime: "Local lookup: {ms} ms", noName: "Product without a name", noValue: "Not specified", connectionError: "Status could not be refreshed. Previously loaded values may be out of date.", loading: "Connecting…"
     },
     de: {
-      eyebrow: "DEIN LOKALER PRODUKTBESTAND", warning: "Frühe Entwicklung · Nur zum Testen verwenden. Vor Updates eine Datensicherung erstellen.",
+      eyebrow: "DEIN LOKALER PRODUKTBESTAND",
       records: "Veröffentlichte Datensätze", recordHint: "Alle verfügbaren Bestände · Metadatenzählung", storage: "MongoDB-Speicher", storageHint: "Daten + Indizes, inklusive laufender Importe",
       nextCheck: "Nächster Abgleich", datasets: "Verfügbare Bestände", live: "LIVE-STATUS", activity: "Synchronisierung", transfer: "Download", datasetHeading: "Deine Datenbestände", refresh: "Anzeige aktualisieren",
       lookupEyebrow: "LOKALE ABFRAGE", lookup: "Produkt finden", lookupHint: "Per EAN in allen vier Beständen suchen. Führende Nullen bleiben erhalten. Es werden keine Daten verändert.",
@@ -110,6 +110,7 @@
   const $ = id => document.getElementById(id);
   let language = navigator.language.toLowerCase().startsWith("de") ? "de" : "en";
   try { const saved = localStorage.getItem("off-proxy-language"); if (saved === "de" || saved === "en") language = saved; } catch (_) {}
+  let sessionGeneration = 0;
   let authenticated = false, authNonce = "", accessOptions = null, apiKeyDirty = false, lastActivity = 0;
   let controlBusy = false, controlNotice = null, fullKind = null;
   let snapshot = null, lookupResult = null, lookupNotice = null, polling = false, lookupSequence = 0, lookupController = null, offset = 0, connected = false, attemptedConnection = false;
@@ -241,11 +242,13 @@
     if (!authenticated) { await checkAuth(); return; }
     if (polling) return;
     polling = true;
+    const generation = sessionGeneration;
     try {
       const response = await fetch("/ui/status", {cache: "no-store", signal: AbortSignal.timeout(12000)});
       if (response.status === 401) { lockGui("sessionExpired"); return; }
       if (!response.ok) throw new Error("status unavailable");
       const data = await response.json();
+      if (!authenticated || generation !== sessionGeneration) return;
       snapshot = data; offset = data.server_epoch - Date.now() / 1000; connected = true;
       $("connection-error").hidden = true;
     } catch (_) {
@@ -256,18 +259,23 @@
   const eye = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
   $("login-eye").innerHTML = eye; $("api-eye").innerHTML = eye;
   function lockGui(message) {
+    sessionGeneration++; lookupSequence++; lookupController?.abort();
     authenticated = false; snapshot = null; connected = false; lookupResult = null;
     $("dashboard-content").hidden = true; $("login-panel").hidden = false; $("logout").hidden = true;
     for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
     for (const id of ["api-key", "current-password", "new-password", "repeat-password", "login-password"]) $(id).value = "";
     $("api-key").type = "password"; $("login-password").type = "password";
+    for (const id of ["api-eye", "login-eye"]) $(id).setAttribute("aria-label", t("showSecret"));
     $("login-error").hidden = !message; if (message) setText("login-error", t(message));
   }
   async function checkAuth() {
+    const generation = sessionGeneration;
     try {
       const response = await fetch("/auth/status", {cache:"no-store", signal:AbortSignal.timeout(12000)});
       if (!response.ok) throw new Error("auth unavailable");
-      const data = await response.json(); authNonce = data.control_nonce;
+      const data = await response.json();
+      if (generation !== sessionGeneration) return;
+      authNonce = data.control_nonce;
       $("setup-help").hidden = $("setup-command").hidden = data.configured;
       $("login-form").hidden = !data.configured; $("login-help").hidden = !data.configured;
       if (data.authenticated) {
@@ -277,8 +285,10 @@
     } catch (_) { $("login-error").hidden = false; setText("login-error", t("connectionError")); }
   }
   async function authPost(path, values = {}) {
+    const generation = sessionGeneration;
     const response = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json", "X-Off-Proxy-Control":authNonce}, body:JSON.stringify(values), signal:AbortSignal.timeout(12000)});
     const data = await response.json();
+    if (generation !== sessionGeneration) throw new Error("stale_session");
     if (!response.ok) { if (response.status === 401 && data.error === "authentication_required") lockGui("sessionExpired"); const error = new Error(data.error || "controlError"); error.status = response.status; throw error; }
     return data;
   }
@@ -309,11 +319,13 @@
   }
   $("session-duration").addEventListener("change", updateSessionInput);
   $("access").addEventListener("click", async () => {
+    const generation = sessionGeneration;
     try {
       const response = await fetch("/ui/security", {cache:"no-store"});
       if (response.status === 401) { lockGui("sessionExpired"); return; }
       if (!response.ok) throw new Error("access failed");
       accessOptions = await response.json();
+      if (!authenticated || generation !== sessionGeneration) return;
       const minutes = String(accessOptions.idle_minutes);
       $("session-duration").value = ["0","30","480"].includes(minutes) ? minutes : "custom";
       $("idle-minutes").value = minutes === "0" ? "30" : minutes; updateSessionInput();
@@ -334,10 +346,13 @@
   }
   $("api-key").addEventListener("input", keyChanged);
   async function currentKey() {
+    const generation = sessionGeneration;
     const response = await fetch("/ui/api-key", {headers:{"X-Off-Proxy-Control":authNonce}, cache:"no-store"});
     if (response.status === 401) { lockGui("sessionExpired"); throw new Error("expired"); }
     if (!response.ok) throw new Error("key failed");
-    return (await response.json()).api_token;
+    const data = await response.json();
+    if (!authenticated || generation !== sessionGeneration) throw new Error("stale_session");
+    return data.api_token;
   }
   $("api-eye").addEventListener("click", async () => {
     try { if (!$("api-key").value) $("api-key").value = await currentKey(); $("api-key").type = $("api-key").type === "password" ? "text" : "password"; translate(); }
@@ -372,7 +387,7 @@
     catch (_) { accessMessage("controlError"); }
   });
   $("password-save").addEventListener("click", async () => {
-    if ($("new-password").value.length < 8 || $("new-password").value !== $("repeat-password").value) { accessMessage("passwordMismatch"); return; }
+    if (Array.from($("new-password").value).length < 8 || $("new-password").value !== $("repeat-password").value) { accessMessage("passwordMismatch"); return; }
     $("password-save").disabled = true;
     try { await authPost("/auth/password", {current_password:$("current-password").value, new_password:$("new-password").value}); lockGui("sessionExpired"); await checkAuth(); }
     catch (error) { if (error.message === "invalid_password") accessMessage("invalid_password"); else if (error.status === 401) lockGui("sessionExpired"); else accessMessage("controlError"); }
@@ -385,14 +400,10 @@
     translate();
   });
   async function sendControl(path, values) {
-    if (controlBusy || !snapshot?.control_nonce) return false;
+    if (controlBusy || !authenticated) return false;
     controlBusy = true; renderStatus();
-    try {
-      const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-Off-Proxy-Control": snapshot.control_nonce}, body: JSON.stringify(values), signal: AbortSignal.timeout(12000)});
-      if (response.status === 401) { lockGui("sessionExpired"); return false; }
-      if (!response.ok) throw new Error("control failed");
-      return true;
-    } catch (_) { controlNotice = "controlError"; return false; }
+    try { await authPost(path, values); return true; }
+    catch (_) { controlNotice = "controlError"; return false; }
     finally { controlBusy = false; await pollStatus(); renderStatus(); }
   }
   $("sync").addEventListener("click", async () => {

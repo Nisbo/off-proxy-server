@@ -71,3 +71,12 @@ def cover_range(ranges, start, end):
             if end < high:
                 remaining.append([end, high])
     return remaining
+
+
+def begin_cycle(db, values):
+    """Claim the cycle atomically against the updater's temporary maintenance gate."""
+    db.scheduler.update_one({'_id': 'sync'}, {'$setOnInsert': {'phase': 'waiting'}}, upsert=True)
+    now = time.time()
+    return db.scheduler.find_one_and_update({'_id': 'sync', '$or': [
+        {'maintenance_until': {'$exists': False}}, {'maintenance_until': {'$lte': now}}]},
+        {'$set': dict(values, phase='running')}, return_document=ReturnDocument.AFTER)

@@ -13,13 +13,22 @@ jobs:
           --health-cmd "mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'"
           --health-interval 10s --health-timeout 10s --health-retries 10
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
       - run: pip install -r requirements-dev.txt
+      - name: Runtime dependency security audit
+        run: pip-audit -r requirements.txt
+      - name: Static and shell checks
+        run: |
+          ruff check app.py control.py dashboard.py security.py --select F,E9
+          bandit -q app.py control.py dashboard.py security.py
+          shellcheck off-proxy install.sh
       - name: Unit, local HTTP and management tests
-        run: python -m pytest -q
+        run: |
+          coverage run --branch --source=app,control,dashboard,security -m pytest -q
+          coverage report -m
       - name: Real MongoDB integration tests
         run: python -m pytest -q test_app.py test_security.py
         env:
@@ -31,4 +40,8 @@ jobs:
       - name: Build application image
         run: |
           docker build -t off-proxy-server:test .
-          docker run --rm off-proxy-server:test python -c 'import app; assert all((app.WEB / f).is_file() for f, _ in app.ASSETS.values()); print(app.VERSION)'
+          docker run --rm off-proxy-server:test python -c 'import app; import os; assert os.geteuid() == 65532; assert all((app.WEB / f).is_file() for f, _ in app.ASSETS.values()); print(app.VERSION)'
+      - name: Real Docker install, update and rollback
+        run: sudo -E "$(command -v python)" -m pytest -q test_docker.py
+        env:
+          DOCKER_SMOKE: '1'

@@ -707,3 +707,114 @@ def test_full_import_keeps_old_products_readable_while_new_copy_is_written(db):
         app.full_import(db, 'food')
     assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == 20
     assert old not in db.list_collection_names()
+
+
+@pytest.mark.parametrize('unreadable_pointer', [False, True])
+def test_lost_publish_acknowledgement_never_deletes_the_active_snapshot(db, unreadable_pointer):
+    from pymongo.errors import AutoReconnect
+    publish(db)
+    real_state = db.state
+    class State:
+        uncertain = False
+        def update_one(self, query, update, **kwargs):
+            result = real_state.update_one(query, update, **kwargs)
+            if 'collection' in update.get('$set', {}):
+                self.uncertain = True
+                raise AutoReconnect('acknowledgement lost after commit')
+            return result
+        def find_one(self, query):
+            if self.uncertain and unreadable_pointer:
+                raise AutoReconnect('pointer temporarily unreadable')
+            return real_state.find_one(query)
+    class Database:
+        state = State()
+        def __getattr__(self, name):
+            return getattr(db, name)
+        def __getitem__(self, name):
+            return db[name]
+    with patch.object(app, 'open_url', return_value=response(compressed(product(version=20)))), pytest.raises(AutoReconnect):
+        app.full_import(Database(), 'food')
+    state = real_state.find_one({'_id':'food'})
+    assert state['collection'] in db.list_collection_names()
+    assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == 20
+
+
+def test_retirement_failure_does_not_turn_successful_full_import_into_failure(db):
+    from pymongo.errors import AutoReconnect
+    publish(db)
+    old = db.state.find_one({'_id':'food'})['collection']
+    class Database:
+        def __getattr__(self, name):
+            return getattr(db, name)
+        def __getitem__(self, name):
+            return db[name]
+        def drop_collection(self, name):
+            if name == old:
+                raise AutoReconnect('cleanup unavailable')
+            db.drop_collection(name)
+    with patch.object(app, 'open_url', return_value=response(compressed(product(version=20)))):
+        app.full_import(Database(), 'food')
+    assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == 20
+    assert old in db.list_collection_names()
+
+
+def test_delta_failure_after_full_import_does_not_requeue_or_fail_the_full_request(db):
+    import control
+    control.request(db, 'full:food')
+    with patch.object(app, 'full_import', side_effect=lambda db, kind: publish(db, kind)), patch.object(app, 'apply_deltas', side_effect=TimeoutError('delta source offline')):
+        with pytest.raises(TimeoutError):
+            app.sync_one(db, 'food')
+    assert db.requests.find_one({'_id':'full:food'})['status'] == 'done'
+    assert db.state.find_one({'_id':'food'})['ready'] is True
+
+
+def test_update_gate_and_cycle_start_cannot_both_win(db):
+    import control
+    now = app.time.time()
+    db.scheduler.insert_one({'_id':'sync','phase':'waiting','maintenance_until':now+600})
+    assert control.begin_cycle(db, {'active_kind':None}) is None
+    assert db.scheduler.find_one({'_id':'sync'})['phase'] == 'waiting'
+    with patch('control.time.time', return_value=now+601):
+        assert control.begin_cycle(db, {'active_kind':None})['phase'] == 'running'
+    assert db.scheduler.update_one({'_id':'sync','phase':{'$ne':'running'}}, {'$set':{'maintenance_until':now+1200}}).matched_count == 0
+
+
+def test_worker_waits_for_update_without_touching_products_or_requests(db):
+    db.scheduler.insert_one({'_id':'sync','phase':'waiting','maintenance_until':app.time.time()+600})
+    with patch.object(app, 'sync_one') as sync, patch.object(app.STOP, 'wait', side_effect=lambda _:app.STOP.set()):
+        app.sync_loop(db)
+    sync.assert_not_called()
+    assert db.requests.count_documents({}) == 0
+
+
+@pytest.mark.parametrize('url', ['file:///etc/passwd', 'http://example.invalid/data.gz'])
+def test_export_downloads_reject_non_https(url):
+    with pytest.raises(ValueError, match='HTTPS'):
+        app.open_url(url)
+    with pytest.raises(ValueError, match='HTTPS'):
+        app.HTTPSRedirects().redirect_request(None, None, 302, 'redirect', {}, url)
+
+
+@pytest.mark.parametrize('query', ['product_type=food&product_type=all', 'lc=de&lc=en'])
+def test_ambiguous_query_parameters_are_rejected(http, query):
+    assert get(http+'/api/v3/product/123.json?'+query)[0] == 400
+    assert get(http+'/ui/lookup?ean=123&'+query, auth=False)[0] == 400
+
+
+def test_oversized_barcode_is_rejected_before_database_lookup(http):
+    assert get(http+'/api/v3/product/'+('1'*257)+'.json')[0] == 400
+
+
+def test_invalid_absolute_request_target_returns_400(http):
+    import socket
+    from urllib.parse import urlsplit
+    address = urlsplit(http)
+    with socket.create_connection((address.hostname, address.port), timeout=5) as connection:
+        connection.sendall(b'GET http://[ HTTP/1.0\r\nHost: localhost\r\n\r\n')
+        assert b' 400 ' in connection.recv(256).split(b'\r\n', 1)[0]
+
+
+def test_query_string_credentials_are_not_written_to_request_logs(http):
+    with patch.object(app.LOG, 'info') as info:
+        assert get(http+'/health?accidental_key=do-not-log-this-secret')[0] == 200
+    assert 'do-not-log-this-secret' not in repr(info.call_args_list)

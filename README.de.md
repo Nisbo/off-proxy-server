@@ -1,279 +1,235 @@
-> **Achtung: Frühe Entwicklung — derzeit nicht produktiv einsetzen. Updates können fehlschlagen, Importe unterbrechen oder unerwartete Fehler verursachen. Nur in einer Testumgebung und mit Datensicherung verwenden.**
+> **Achtung: Frühe Entwicklung — derzeit nicht produktiv einsetzen. Updates können fehlschlagen. Eine getrennte Testinstallation und Datensicherungen verwenden.**
 
 # OFF Proxy Server
 
-[English](README.md) · [GitHub](https://github.com/Nisbo/off-proxy-server)
+[English](README.md) · [GitHub](https://github.com/Nisbo/off-proxy-server) · [Änderungen](CHANGELOG.md)
 
-Ein kleiner selbst gehosteter Produktserver mit lokaler MongoDB-Kopie der
-Open-Food-Facts-Datenbestände. Für Barcode-Abfragen und Anwendungen wie den
-HA List Manager. **Frühe Version: unterstützt die Produktabfrage, keinen
-vollständigen Nachbau aller OFF-API-Funktionen.**
+Ein selbst gehosteter Produktserver für Barcode-Abfragen mit lokaler Kopie von
+**Open Food Facts, Open Beauty Facts, Open Pet Food Facts und Open Products Facts**.
+Die vollständigen exportierten Produktdokumente bleiben erhalten. Bilder werden
+als externe URLs verwendet und nicht heruntergeladen.
 
-## Funktionen
-
-- Vollständige exportierte Produktdatensätze aus Lebensmittel, Kosmetik,
-  Tiernahrung und sonstigen Produkten. Bilder bleiben externe URLs.
-- EAN-Abfrage über `/api/v3/product/<barcode>.json`, mit `product_type`,
-  Auswahl einfacher Felder über `fields` und `lc` für Bildauswahl.
-- Delta-Prüfung alle sechs Stunden sowie manuell über die Oberfläche.
-- Vollimporte standardmäßig nur nach Bestätigung; regelmäßige Vollabgleiche deaktiviert.
-- Veröffentlichung eines Vollimports erst nach dessen vollständigem Erfolg.
-- Wiederholbare Deltas mit Schutz gegen Überschreiben durch ältere Produktstände.
-- Datensätze ohne Barcode bleiben erhalten und werden separat gezählt;
-  führende Nullen und ungewöhnliche Quellcodes bleiben erhalten.
-- API mit Zugangsschlüssel, zunächst nur lokal erreichbar. Kein veröffentlichter
-  Datenbank-Port.
-- Kurze Befehle für Installation, Updates, Status, Logs, Produkttest und Rücknahme.
-- Offene Testoberfläche mit Statistik, Importfortschritt, nächsten Terminen und EAN-Abfrage über alle Bestände.
-
-**Noch nicht enthalten:** Namenssuche, Benutzer-Schreibzugriffe oder automatische
-OFF-Abfragen bei unbekannten Codes. Letzteres ist als optionale Erweiterung
-geplant, die gefundene Originaldaten lokal zwischenspeichert.
+Unterstützt wird die Produktabfrage per Barcode, nicht die komplette OFF-API.
+Namenssuche, Produktbearbeitung, öffentliche GUI-Suche und automatisches Nachladen
+unbekannter Produkte fehlen noch. Die Anbindung an HA List Manager ist noch nicht enthalten.
 
 ## Voraussetzungen
 
-Linux mit Bash, Docker, Docker Compose v2, curl, tar und util-linux (`flock`).
-Installation und Verwaltung erfolgen als root. Auf dem Host werden kein Python,
-pip, Git, zusätzlicher Webserver oder Datenbankdienst benötigt. MongoDB 8 setzt
-eine kompatible CPU voraus; bei x86-64 ist AVX erforderlich.
+- Linux, Bash, Docker mit Docker Compose v2, curl, tar und util-linux (`flock`).
+  Installation und Verwaltung als root. Docker und Betriebssystempakete werden
+  nicht automatisch installiert. Python, pip, Git und ein zusätzlicher Webserver
+  sind auf dem Host nicht erforderlich.
+- MongoDB 8 benötigt eine passende CPU; bei x86-64 ist AVX erforderlich.
+- Als Ausgangspunkt etwa 2 CPU-Kerne und 2–4 GiB verfügbaren RAM für diese Dienste
+  vorsehen. Die Containerlimits ergeben zusammen rund 2 GiB, ohne den Host.
+- In einer Installation belegten etwa fünf Millionen Produkte **36 GiB auf Platte**
+  und die Dienste nach dem Import ungefähr 1 GiB RAM. Für einen Vollimport müssen
+  alter und neuer Bestand nebeneinander passen; bei dieser Messung waren etwa
+  80–100 GiB freier Speicher eine Reserve. Das ist keine Größengarantie.
+  Docker-Images, Sicherungen und Wachstum kommen hinzu. CPU-Limits begrenzen keine Plattenlast.
 
-Als Ausgangspunkt etwa 2 CPU-Kerne und 2–4 GiB RAM für die Dienste vorsehen.
-In einer bisherigen Installation belegten knapp fünf Millionen vollständige
-Produktdatensätze 36 GiB und die Dienste nach dem Import rund 1 GiB RAM.
-Das ist eine Messung, keine Garantie für andere Systeme oder künftige Datenmengen.
-Vollimporte brauchen vorübergehend Platz für alten und neuen Bestand; bei dieser
-Größe sind etwa 80–100 GiB freier Speicher vor dem Import eine Reserve.
-Docker-Images, Bilder, Sicherungen und Wachstum kommen gegebenenfalls dazu.
-CPU-Limits begrenzen keine Plattenlast.
+## Installieren und anmelden
 
-## Installation und Übernahme des Prototyps
-
-Als root in die Shell kopieren:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
-```
-
-Die Skripte [install.sh](install.sh) und [off-proxy](off-proxy) sind vollständig
-einsehbar. Der Installer lädt einen bestimmten GitHub-Commit, baut das Image
-und startet ein eigenes Compose-Projekt. Andere Container werden nicht verändert;
-es werden keine apt-Pakete installiert.
-
-Neue Installationen liegen unter `/opt/off-proxy-server`. Der zufällige
-API-Schlüssel wird in `.env` mit Dateirechten 600 gespeichert. Daten und
-Konfiguration liegen außerhalb der ausgetauschten Quellcode-Versionen.
-Updates beziehen sich zunächst auf `main`; stabile Releases gibt es noch nicht.
-
-**Ein vorhandener Prototyp unter `/opt/off-local-api` wird automatisch erkannt:**
-
-- Unterstützung für Versionen 0.1.0 bis 0.1.2.
-- Datenbank bleibt in `data` und `configdb` am bisherigen Ort.
-- Docker-Projektname `off-local-api` bleibt erhalten; keine zweite Datenbank.
-- `.env` mit Schlüssel, Adresse und Port wird unverändert übernommen.
-- Alte Dateien bleiben unverändert, eine Quellcode-Sicherung erlaubt die Rücknahme.
-- Ein laufender Import verhindert das Update zunächst, bevor Dienste gestoppt werden.
-- Die Übernahme allein löst keinen erneuten Vollimport aus. Der reguläre
-  Aktualisierungsplan gilt weiterhin.
-
-**Danach `off-proxy` verwenden**, nicht mehr das alte `manage.sh` oder die alte
-Compose-Datei. Weitere Einstellungen gehören in `/opt/off-proxy-server/.env`;
-die alte `.env` bleibt als historische Kopie bestehen.
-
-## Befehle
+In einer **Bash-Shell als root**:
 
 ```sh
-off-proxy status
-off-proxy logs
-off-proxy test 0000527000057 beauty
-off-proxy test 4062139025398 food
-off-proxy update
-off-proxy rollback
-off-proxy stop
-off-proxy start
-off-proxy down
+set -o pipefail
+curl -fsSL --proto '=https' https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
 ```
 
-`logs`: Strg+C schließt nur die Ansicht. `stop` erhält sämtliche Daten; `down`
-entfernt zusätzlich die eigenen Container und Netzwerke. `start` startet die
-vorhandene Version. `rollback` wechselt zur vorherigen Software, stellt aber
-keine Datenbanksicherung wieder her. Diese Version ändert kein Datenbankschema.
-
-Updates bauen das neue Image vor dem Stoppen der bisherigen Dienste und prüfen
-danach die neue API-Version. Bei fehlgeschlagener Aktivierung wird versucht,
-die bisherigen Dienste wieder zu starten. Ohne neuen Commit wird nichts neu
-gestartet. Quellcode-Versionen bleiben für die Rücknahme lokal gespeichert.
-
-Die Shell erst schließen, wenn der Installations-/Updatebefehl fertig ist.
-Anschließende Importe laufen selbstständig im Hintergrund, gegebenenfalls
-mehrere Stunden. Ein unterbrochener, unfertiger Vollimport benötigt eine neue
-Bestätigung und beginnt dann erneut; veröffentlichte Bestände bleiben erhalten.
-Bei einer Erstinstallation die Oberfläche öffnen und den Erstimport pro Bestand bestätigen.
-
-## Geschützte Oberfläche und API-Zugriff
-
-Nach dem Update im Browser `http://<BIND_IP>:8097/` öffnen. Ein Browser direkt
-auf dem Server kann `http://127.0.0.1:8097/` verwenden. Die Oberfläche unterstützt
-Deutsch und Englisch; die Sprachauswahl wird lokal im Browser gespeichert.
-
-Die Oberfläche bleibt gesperrt, bis du ein Administrator-Passwort festlegst.
-Bei einer neuen interaktiven Installation wird dein selbst gewähltes Passwort
-zweimal im Terminal abgefragt. Es gibt keinen erzeugten Einrichtungscode.
-Nach dem Update einer bestehenden Installation oder zum Zurücksetzen:
+Der Installer fragt zweimal nach deinem selbst gewählten Administrator-Passwort
+mit **8–256 Zeichen**. Eingabe und Einfügen bleiben verdeckt; es gibt keinen erzeugten
+Einrichtungscode. Ohne interaktives Terminal bleibt die GUI gesperrt. Passwort
+nachträglich festlegen oder zurücksetzen:
 
 ```sh
 off-proxy password
 ```
 
-Die Eingabe bleibt verdeckt, auch beim Einfügen. Das Passwort wird nur über die
-Standardeingabe weitergegeben, niemals als Befehlsargument. 8–256 Zeichen verwenden.
-Bis zur Einrichtung funktionieren vorhandene API-Clients und die Synchronisierung
-weiter; GUI-Daten und Steuerung sind gesperrt. Eine öffentliche GUI-Suche ist in
-dieser Version nicht enthalten.
+Neue Installationen liegen unter `/opt/off-proxy-server`. Startskript und Anwendung
+stammen aus demselben festgelegten GitHub-Commit. Installiert werden nur Laufzeitdateien,
+keine Tests, CI-Konfiguration oder Entwicklungswerkzeuge. Die Anwendung läuft im
+Container ohne Root-Rechte. MongoDB veröffentlicht keinen Host-Port. Andere
+Container und Datenbanken werden nicht verändert.
 
-Unter **Zugriff & API**:
+Standardmäßig ist die Oberfläche **nur auf dem Server selbst** unter
+`http://127.0.0.1:8097/` erreichbar. Für einen anderen Rechner `BIND_IP` in
+`/opt/off-proxy-server/.env` auf die konkrete LAN-/VPN-Adresse des Servers setzen,
+anschließend `off-proxy start` ausführen. `PORT` ist standardmäßig `8097`.
+`0.0.0.0` gibt bewusst alle IPv4-Schnittstellen frei; besser eine konkrete Adresse
+und eingeschränkten Netzwerkzugriff verwenden. Bindings außerhalb laufender
+Importe ändern, weil Compose Container neu erstellen kann.
 
-- Nach Inaktivität abmelden: 30 Minuten (Standard), 8 Stunden, eigene Dauer oder
-  kein Inaktivitätsablauf. Statusabfragen verlängern die Sitzung nicht, Bedienung
-  dagegen schon. Cookies überstehen Browser-Neustarts, maximal für ein Jahr.
-- Abmelden, alle Sitzungen abmelden und Passwort mit dem aktuellen Passwort ändern.
-  Passwortänderung und Zurücksetzen im Terminal widerrufen alle Sitzungen.
-- Gespeicherten API-Schlüssel mit dem Auge anzeigen/verbergen oder verdeckt kopieren.
-  Eigenen Schlüssel mit 24–256 Zeichen festlegen oder einen neuen generieren.
-  Änderung bestätigen und speichern: Der alte Schlüssel funktioniert dann sofort
-  nicht mehr, auch bei bereits angeschlossenen API-Clients.
-- API-Schlüssel verlangen (Standard) oder **Produkt-API** ohne Schlüssel ausdrücklich
-  freigeben. Statistiken, GUI-Abfrage, Einstellungen, Importsteuerung und `/health`
-  werden dadurch niemals öffentlich.
+`http://<Serveradresse>:8097/` öffnen, anmelden und für jeden gewünschten Bestand
+**Vollimport …** bestätigen. Es gibt keinen automatischen Erstimport. Lebensmittel
+können beim ersten Import Stunden benötigen. Sobald der Installationsbefehl fertig
+ist, läuft der Hintergrunddienst unabhängig von Shell und Browser weiter.
 
-Produktdaten, Abgleicheinstellungen und vorhandene API-Schlüssel bleiben erhalten.
-`API_TOKEN` aus `.env` dient nur beim ersten Start zur Übernahme in den dauerhaften
-Zugriffsdatensatz. Nach einem Wechsel liegt der aktuelle Schlüssel wieder auslesbar
-in MongoDB, damit ein angemeldeter Administrator ihn anzeigen kann. Status, Update
-und Test lesen diesen aktuellen Schlüssel; `.env` bleibt unverändert. Ein Rollback
-auf Software vor 0.1.7 nutzt wieder den ursprünglichen `.env`-Schlüssel und bietet
-diesen GUI-Schutz nicht.
+## Befehle im Alltag
 
-Passwörter werden mit individuellem Salt und PBKDF2-HMAC-SHA256 mit 600.000
-Iterationen gehasht. Zufällige Sitzungstokens liegen nur als Hash vor und werden
-in HttpOnly-/SameSite=Strict-Cookies übertragen. Fehlversuche werden dauerhaft
-begrenzt; Steuerungsaktionen erfordern Sitzung und CSRF-Token. Grundlage sind die
-[OWASP-Passwortempfehlungen](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-und [Sitzungsempfehlungen](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+| Befehl | Funktion |
+| --- | --- |
+| `off-proxy status` | Version und Status der Bestände |
+| `off-proxy logs` | Abgleich-Logs verfolgen; Strg+C schließt nur die Ansicht |
+| `off-proxy test 4062139025398 all` | Produkt in allen verfügbaren Beständen abfragen |
+| `off-proxy password` | GUI-Passwort setzen/zurücksetzen und alle Sitzungen abmelden |
+| `off-proxy update` | Aktuellen Commit von `main` herunterladen und aktivieren |
+| `off-proxy rollback` | Zur vorherigen lokal gespeicherten Software zurückkehren |
+| `off-proxy stop` / `off-proxy start` | Diese Installation stoppen/starten; Daten behalten |
+| `off-proxy down` | Nur eigene Container/Netzwerke entfernen; Daten behalten |
 
-Domain-Zugriff über HTTPS nutzen. Der Reverse Proxy muss `X-Forwarded-Proto: https`
-setzen und vom Client mitgebrachte Forwarded-Header überschreiben; dann erhält
-das Cookie das Secure-Attribut. Direktes HTTP bleibt für vertrauenswürdige lokale
-Testnetze möglich, verschlüsselt aber weder Passwort noch Produktabfragen.
-Passwörter und API-Schlüssel gehören nicht in URLs. Produkte lassen sich nicht
-bearbeiten; Importaufträge führt der vorhandene einzige Hintergrunddienst aus.
+Derzeit gibt es **keine getrennten Stable-/Beta-Kanäle und keine unbeaufsichtigten
+Updates**. Manuelle Updates folgen `main`; getrennte Veröffentlichungskanäle sind
+noch zu besprechen. Derselbe Commit löst keinen erneuten Build oder Neustart aus.
 
-Der Fortschritt zeigt verarbeitete Datensätze und heruntergeladene komprimierte
-Bytes, sofern die Quelle ihre Gesamtgröße angibt. Eine Gesamtzahl von Datensätzen
-ist beim Erstimport nicht bekannt; dafür wird keine Prozentzahl erfunden.
-Der nächste Abgleich wird vom tatsächlichen Hintergrunddienst nach Ende eines
-Durchlaufs gespeichert. Beim Vollimport wird der Fälligkeitszeitpunkt angezeigt;
-geprüft wird er bei einem nachfolgenden Abgleich. Die Bestätigungspflicht gilt
-weiterhin. Ausbleibende Rückmeldungen
-des Hintergrunddienstes werden kenntlich gemacht.
+Updates bauen das neue Image vor dem Stoppen, werden bei aktiven Importen
+zurückgestellt und prüfen danach die API-Version. Hintergrunddienst und Updater
+stimmen den Start eines Abgleichs über eine vorübergehende Wartungssperre ab.
+Bei fehlgeschlagener Aktivierung wird versucht, die bisherigen Dienste wieder zu
+starten. Nach einem abgebrochenen Updater läuft die Sperre innerhalb von zehn
+Minuten aus. Sie setzt den aktualisierten Dienst voraus; alte Prototypen kennen
+sie nicht. Daten, Passwörter, API-Schlüssel, Bindings und Einstellungen bleiben erhalten.
 
-Statistiken nutzen MongoDB-Metadaten und einen 30-Sekunden-Cache statt vollständiger
-Produktscans. Der Speicherwert umfasst belegten Daten-/Indexspeicher inklusive
-laufender Import-Collections, ohne Journal-/Dateisystem-Overhead. Er kann von
-`du` abweichen. Die GUI-Erweiterung übernimmt die vorhandenen Bestände; ein
-Vollimport ist dafür nicht erforderlich. Fortschritt wird ab dem nächsten
-Import des aktualisierten Hintergrunddienstes erfasst.
+**Rollback stellt Software zurück, keine Datenbanksicherung.** Eine Rückkehr auf
+Versionen vor 0.1.7 entfernt außerdem den GUI-Schutz und nutzt wieder den ursprünglichen
+API-Schlüssel aus `.env`.
 
-## API-Test mit curl
+## Oberfläche und Zugriff
 
-Nach erfolgreichem Kosmetikimport auf dem Server:
+Die GUI unterstützt Deutsch und Englisch und merkt sich die Sprache im Browser.
+Statistiken, GUI-Abfrage und Steuerung benötigen eine Administrator-Anmeldung.
+
+- **Anzeige aktualisieren** lädt nur die Anzeige neu. Metadatenzählungen können
+  30 Sekunden zwischengespeichert sein. Der Speicherwert umfasst Daten und Indizes,
+  aber nicht den gesamten Dateisystem-Overhead.
+- **Daten jetzt abgleichen** fordert eine Delta-Prüfung an. Mehrfachklicks werden
+  zusammengefasst; der einzige Hintergrunddienst übernimmt den Auftrag, sobald er frei ist.
+- **Vollimport …** öffnet zuerst eine Bestätigung. Download und Entpacken erfolgen
+  direkt in einen separaten Bestand. Erst ein vollständig erfolgreicher, geprüfter
+  Import ersetzt die veröffentlichte Zuordnung. Danach wird die alte Kopie entfernt.
+  Bei einem Fehler davor bleibt der alte Bestand erhalten. Vorübergehend brauchen
+  beide Kopien Speicherplatz.
+- **Einstellungen** regelt Delta-Lücken, Vollimport-Bestätigung und optionale Intervalle.
+  Standard: verfügbare Deltas fortsetzen, Vollimporte bestätigen und Intervall `0`
+  (deaktiviert). Automatische Vollimporte benötigen eine zusätzliche ausdrückliche Zustimmung.
+- **Zugriff & API** regelt Inaktivitätsablauf (standardmäßig 30 Minuten, 8 Stunden,
+  eigene Dauer oder deaktiviert), Passwortwechsel und Abmelden aller Sitzungen.
+  Statusabfragen verlängern die Sitzung nicht, tatsächliche Bedienung schon.
+  Cookies bleiben höchstens ein Jahr erhalten. Passwortänderung und Zurücksetzen
+  im Terminal widerrufen alle Sitzungen.
+
+Unterbrochene oder vor der Veröffentlichung gescheiterte Vollimporte benötigen
+standardmäßig eine neue Bestätigung. Ein späterer Fehler der Delta-Quelle macht
+einen erfolgreich abgeschlossenen Vollimport nicht nachträglich zu einem gescheiterten
+Vollimport-Auftrag. Leere Exporte oder mehr als 25 Prozent weniger Datensätze werden
+zur Prüfung abgewiesen.
+
+Mit dem Auge den gespeicherten API-Schlüssel anzeigen/verbergen oder verdeckt
+**Kopieren**. Einen neuen erzeugen oder selbst 24–256 ASCII-Zeichen ohne Leerzeichen
+eingeben. Erst Speichern übernimmt die Änderung; vorhandene Clients brauchen dann
+sofort den neuen Schlüssel. `API_TOKEN` in `.env` wird nur beim ersten Start übernommen.
+Spätere Schlüssel liegen wieder auslesbar in MongoDB; Status, Update und Test nutzen
+immer diesen aktuellen Schlüssel.
+
+API-Authentifizierung ist standardmäßig aktiv. Eine ausdrücklich bestätigte
+Freigabe ohne Schlüssel öffnet **nur Produktabfragen über die API**. GUI-Abfrage,
+Statistiken, Einstellungen, Importsteuerung und `/health` bleiben geschützt.
+Öffentliche GUI-Suche ist für später vorgesehen.
+
+Passwörter liegen als individuell gesalzene PBKDF2-HMAC-SHA256-Hashes mit 600.000
+Iterationen vor. Zufällige Sitzungstokens werden nur als Hash gespeichert; Cookies
+sind HttpOnly und SameSite=Strict. Steuerung benötigt zusätzlich CSRF-Schutz;
+Anmeldeversuche werden dauerhaft begrenzt. Für Domains HTTPS verwenden. Der Proxy
+muss fremde Forwarded-Header überschreiben und `X-Forwarded-Proto: https` setzen,
+damit Cookies Secure erhalten. Direktes HTTP ist für vertrauenswürdige lokale
+Testnetze möglich, verschlüsselt aber weder Zugangsdaten noch Verkehr.
+
+## Produkt-API
+
+Ein einfacher Test auf dem Server nutzt den aktuellen Schlüssel automatisch:
+
+```sh
+off-proxy test 0000527000057 beauty
+```
+
+Für curl den aktuellen Schlüssel aus der GUI kopieren und verdeckt eingeben:
 
 ```sh
 read -r -s -p 'Aktueller API-Schlüssel: ' TOKEN
 printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:8097/api/v3/product/0000527000057.json?product_type=beauty&fields=code,product_name,brands,quantity'
+  'http://127.0.0.1:8097/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url'
 unset TOKEN
 ```
 
-`product_type`: `food` (Standard), `beauty`, `petfood`, `product`, `all`.
-`/health` benötigt denselben Schlüssel und meldet alle vier Bestände.
-`all_ready` bedeutet, dass die Vollimporte vorhanden sind; `all_synced` zusätzlich,
-dass der letzte Delta-Abgleich überall erfolgreich war. Bei unvollständigen
-Beständen kommt für unbekannte EANs 503 statt einer irreführenden 404-Antwort.
+| Parameter | Unterstützte Werte |
+| --- | --- |
+| `product_type` | `food` (Standard), `beauty`, `petfood`, `product`, `all` |
+| `lc` | Sprache für ausgewählte Bild-URLs, etwa `de` oder `en` |
+| `fields` | Kommagetrennte Felder der obersten Ebene; ohne Angabe/`all`/`raw` vollständiges Dokument |
 
-Die API bietet einfache Produktfelder und die vom List Manager benötigte
-Produktabfrage. Keine allgemeine OFF-Suche, Schreib-API, vollständige Nachbildung
-berechneter Felder, Barcode-Normalisierung oder Weiterleitungen. Der List Manager
-benötigt für die Nutzung noch eine separate Serveradresse-/Token-Einstellung.
-Dieses Projekt verändert Home Assistant nicht.
+Barcodes sind Ziffernfolgen mit höchstens 256 Zeichen; führende Nullen bleiben
+erhalten. Die Antwort verwendet die OFF-v3-Produktstruktur. Treffer liefern 200.
+Unbekannte Produkte liefern 404, wenn alle angefragten Bestände verfügbar sind,
+andernfalls 503. Treffer können auch bei anderen noch fehlenden Beständen
+zurückgegeben werden. `/health` benötigt immer den aktuellen API-Schlüssel.
+`all_ready` bedeutet vorhandene Vollbestände; `all_synced` zusätzlich erfolgreiche
+Delta-Prüfungen ohne bekannte Lücke. Keine allgemeine OFF-Suche, Schreib-API,
+Barcode-Normalisierung oder vollständige Nachbildung berechneter Felder.
+Schlüssel und Passwörter niemals in URLs eintragen.
 
-Für Site-to-Site-Zugriff später `BIND_IP` in `.env` auf die konkrete VPN-/LAN-Adresse
-des Servers setzen und `off-proxy start` verwenden. Außerhalb laufender Importe
-ändern: geänderte Umgebungseinstellungen können Container neu erstellen.
-VPN oder HTTPS für die Übertragung nutzen; API nicht pauschal öffentlich freigeben.
+## Deltas und Ausfälle
 
-## Quellen und Aktualisierung
+Der Dienst prüft alle sechs Stunden. Vorübergehende Zeitüberschreitungen, HTTP 429
+oder 5xx lassen den Dateifortschritt unverändert; spätere Abgleiche versuchen erneut.
+Andere Bestände laufen weiter. Unvollständige Delta-Dateien können schon einzelne
+Produkte geändert haben, werden aber sicher wiederholt. Versionsprüfungen verhindern
+das Überschreiben neuerer Produkte mit älteren Daten.
 
-Die vier ursprünglichen JSONL-Quellen sind eingerichtet. Ein Quellenfehler wird
-angezeigt und erneut versucht; andere Bestände werden unabhängig verarbeitet.
-Die Tiernahrungsquelle wird in dieser Version bewusst nicht auf einen anderen
-Spiegel umgestellt.
+Start-/Endzeitstempel in Dateinamen bestimmen die Abdeckung. Fehlende Zeiträume
+in einem erfolgreich geladenen Index oder dort genannte Dateien mit 404/410 werden
+als dauerhafte Lücke vermerkt. Neuere verfügbare Deltas laufen standardmäßig weiter;
+optional pausieren nur die neueren Aktualisierungen des betroffenen Bestands.
+Vorhandene Produkte bleiben abfragbar. Eine zurückkehrende alte Datei kann die
+Lücke schließen; andernfalls ist ein bestätigter Vollimport erforderlich.
+Fehlende Änderungen innerhalb einer ansonsten gültigen Quelldatei sind so nicht erkennbar.
 
-Die Steuerung in der Oberfläche:
+OFF hält üblicherweise ungefähr 14 Tage Deltas vor und liefert keine Löschmeldungen.
+Wenige verpasste Tage werden nachgeholt, solange die Dateien verfügbar sind.
+Abgelaufene Dateien starten keinen ungefragten Vollimport: Warnung und standardmäßige
+Bestätigungspflicht bleiben bestehen. Optionale Vollabgleiche übernehmen auch
+Löschungen. Die Quelladressen stehen in [app.py](app.py); Bilder werden nicht heruntergeladen.
 
-- **Anzeige aktualisieren:** lädt nur die Anzeige neu. Produktzahlen können bis
-  zu 30 Sekunden zwischengespeichert sein.
-- **Daten jetzt abgleichen:** fordert eine Delta-Prüfung aller Bestände an.
-  Mehrfachklicks bei vorgemerktem/laufendem Auftrag werden zusammengefasst.
-  Im Leerlauf prüft der einzige Hintergrunddienst alle zwei Sekunden auf Aufträge;
-  laufende Importe werden zuerst beendet.
-- **Vollimport …:** vollständigen Download und Neuaufbau eines Bestands ausdrücklich
-  bestätigen. Vorhandene Daten bleiben abfragbar. Fehlgeschlagene oder unterbrochene
-  Vollimporte werden ohne neue Bestätigung nicht automatisch wiederholt.
-- **Einstellungen:** Verhalten bei Delta-Lücken, Vollimport-Bestätigung und optionales
-  Vollabgleich-Intervall. Einstellungen und Aufträge liegen in MongoDB und bleiben
-  bei Updates erhalten; `.env` bleibt unverändert.
+## Sicherungen, Fehler und Entfernen
 
-Standard auch beim Update von 0.1.4: verfügbare **Deltas weiter einspielen**, **alle
-Vollimporte bestätigen**, regelmäßige Vollabgleiche deaktiviert (Intervall `0`).
-Das alte `FULL_DAYS=30` schaltet keine automatischen Importe mehr ein. Ein optionales
-Intervall markiert bei aktiver Bestätigungspflicht nur die Fälligkeit. Automatische
-Vollimporte sind separat und mit ausdrücklicher Zustimmung einschaltbar; das gilt
-für Erstimporte, Lückenbehebung und aktivierte Intervalle.
+Für eine konsistente Dateisicherung zuerst `off-proxy stop` ausführen. `.env`,
+`.state`, aufbewahrte Quellcode-Versionen und **beide MongoDB-Verzeichnisse `data`
+und `configdb`** sichern. Danach `off-proxy start`. Der Datenpfad steht in
+`/opt/off-proxy-server/.state/runtime`; bei früher übernommener Installation kann
+er `/opt/off-local-api` sein und muss zusätzlich gesichert werden. Sicherungen
+enthalten API-Zugangsdaten und Passwort-Hashes; Zugriff beschränken und Wiederherstellung
+getrennt testen. Software-Rollback ersetzt keine Datensicherung.
 
-OFF stellt ungefähr 14 Tage Deltas bereit, ohne Löschmeldungen. Vollabgleiche
-übernehmen Löschungen und dauerhaft fehlende Änderungen. Beim Fortsetzen nach
-Lücken werden neuere Änderungen übernommen; Produkte, die nur im fehlenden
-Zeitraum geändert wurden, können veraltet bleiben. Der Bestand bleibt als
-unvollständig gekennzeichnet. Optional lassen sich stattdessen neuere Deltas nur
-für den betroffenen Bestand pausieren. Vorhandene Produkte und andere Bestände
-bleiben abfragbar.
+- GUI gesperrt: `off-proxy password`, danach Seite neu laden.
+- Importfehler: `off-proxy status` und `off-proxy logs`; keine Daten löschen.
+- Kein Speicherplatz: Host-Belegung einschließlich Docker-Images und Importkopien prüfen.
+- Update zurückgestellt: laufenden Abgleich beenden lassen und erneut versuchen.
+- Delta-Lücke: Fortsetzen/Pausieren wählen; Vollimport zu einem passenden Zeitpunkt bestätigen.
+- Nach Update: Browserseite neu laden. Schlüsselwechsel benötigen keinen Neustart.
 
-Lücken werden anhand der Start-/Endzeitstempel in den Dateinamen erkannt, nicht
-an Kalendertagen. Ein fehlender Zeitraum in einem erfolgreich geladenen Index
-oder HTTP 404/410 für eine dort aufgeführte Datei wird dauerhaft vermerkt.
-HTTP 5xx, 429 und Zeitüberschreitungen allein gelten **nicht** als Lücke: Der
-Dateifortschritt bleibt erhalten und unvollständige Dateien werden wiederholt.
-Nach drei Tagen Ausfall werden alle noch verfügbaren zusammenhängenden Deltas
-nachgeholt. Taucht eine fehlende Datei wieder auf, kann sie die Lücke nachträglich
-schließen; Versionsprüfungen verhindern das Überschreiben neuerer Produkte.
-Andernfalls bleibt die Warnung bis zum erfolgreichen bestätigten Vollimport.
-Fehlende Änderungen innerhalb einer sonst gültigen Quelldatei sind so nicht erkennbar.
+Zum Entfernen der Dienste `off-proxy down`. Verzeichnisse nur löschen, wenn auch
+ihre Daten entfernt werden sollen. Es gibt kein globales Docker-Prune und keine
+Bereinigung fremder Images. Aufbewahrte Anwendungsimages und Quellen erlauben Rollback.
 
-Bei einer Größenabnahme des Vollbestands
-um mehr als 25 Prozent wird zur Prüfung abgebrochen. Abgebrochene Delta-Dateien
-können einzelne Produkte bereits aktualisiert haben; der Dateifortschritt wird
-erst nach erfolgreichem Ende gespeichert und die Datei gegebenenfalls wiederholt.
+## Bestehende Prototypen übernehmen
 
-## Entfernen
+Versionen 0.1.0–0.1.2 unter `/opt/off-local-api` werden weiterhin erkannt. Compose-Projekt,
+Datenbankpfad und Konfiguration bleiben erhalten; die Datenbank wird weder kopiert
+noch erneut importiert. Die bisherigen Quellen werden lokal gesichert.
+Danach **nur `off-proxy`** verwenden, nicht das alte `manage.sh` oder Compose-Projekt.
+Diese Kompatibilität ist vom normalen Einstieg für neue Installationen getrennt.
 
-Zuerst `off-proxy down`. Danach können Programmordner und Befehlsdatei manuell
-entfernt werden. Bei übernommener Installation liegen die Daten weiterhin unter
-`/opt/off-local-api`: diesen Ordner nur bei ausdrücklich gewünschter Datenlöschung
-entfernen. Kein Befehl führt eine globale Docker-Bereinigung aus. Images bleiben
-im Docker-Cache.
-
-## Entwicklung und Lizenz
+## Entwicklung und Prüfungen
 
 ```sh
 python3 -m venv .venv
@@ -281,15 +237,24 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-Unit-Tests verwenden mongomock. CLI-Tests simulieren Docker/GitHub und prüfen
-insbesondere Daten-/Schlüsselerhalt, Übernahme, Updatefehler, Importschutz und
-Rücknahme. Mit `MONGO_TEST_URI=mongodb://127.0.0.1:27017/` werden die Datenbanktests
-gegen echte MongoDB ausgeführt. Dafür werden ausschließlich eigene, zufällig
-benannte Testdatenbanken angelegt und entfernt. GitHub CI prüft beide Varianten,
-Shell-/Compose-Konfiguration und Docker-Build.
+Tests nutzen erzeugte Beispieldaten, keine echten Produkt-Dumps. `MONGO_TEST_URI`
+kann auf eine separate MongoDB zeigen; erstellt/gelöscht werden nur zufällig benannte
+Testdatenbanken. CLI-Tests simulieren Downloads/Docker. Ein zusätzlicher, ausdrücklich
+aktivierter Docker-Test führt Installation, Schlüsselwechsel, Update und Rollback
+wirklich aus, mit lokalen Quellarchiven und ohne OFF-Import. Nur als root mit
+`DOCKER_SMOKE=1` auf einem entbehrlichen Docker-Testhost starten; verwendet werden
+Port 8097 und das Compose-Projekt `off-proxy-server`. Niemals auf dem installierten Server ausführen.
 
-Programmcode: [MIT](LICENSE), Nisbo. Die Produktdaten haben eine eigene Lizenz:
-**Open Food Facts contributors**, ODbL für die Datenbank und DbCL für Inhalte;
-Bilder unterliegen eigenen Bedingungen. [OFF-Daten und Nutzungsbedingungen](https://world.openfoodfacts.org/data).
-Keine Produkt-Dumps, privaten Konfigurationen oder Schlüssel im Repository.
-Unabhängiges Projekt, kein offizieller OFF-Dienst.
+CI prüft diese Abläufe, Testabdeckung, Ruff, Bandit, ShellCheck, Compose und Image-Build.
+Laufzeitabhängigkeiten prüfen: `pip-audit -r requirements.txt`. Tests und Werkzeuge
+bleiben für Nachvollziehbarkeit auf GitHub, gelangen aber weder in installierte
+Versionen noch ins Anwendungsimage. Erfolgreiche Prüfungen sind keine Garantie für
+vollständige Sicherheit oder volle OFF-API-Kompatibilität.
+
+## Lizenz
+
+Code: [MIT](LICENSE), Nisbo. Produktdaten haben eigene Bedingungen:
+**Open Food Facts contributors**, ODbL für die Datenbank, DbCL für Inhalte;
+Bilder mit eigenen Lizenzen. [OFF-Daten und Nutzung](https://world.openfoodfacts.org/data).
+Unabhängiges Projekt, kein offizieller OFF-Dienst. Keine Produkt-Dumps,
+privaten Konfigurationen oder API-Zugangsdaten werden hier verteilt.

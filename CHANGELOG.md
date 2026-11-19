@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.9
+
+- EN: Upgrade PyMongo to 4.18.3, enforce HTTPS source redirects and run the application
+  without root. Preserve published snapshots after an ambiguous database acknowledgement;
+  separate full-import completion from later delta failures.
+- EN: Coordinate worker starts with updater maintenance, pin bootstrap/source commits,
+  install runtime files only, and guard GUI responses after logout. Remove the GUI test
+  banner and rewrite both guides. Add static checks and actual Docker management tests.
+- DE: PyMongo auf 4.18.3 aktualisieren, HTTPS-Quellen erzwingen und Anwendung ohne Root
+  betreiben. Veröffentlichte Bestände bei unklarer Datenbankbestätigung erhalten;
+  Vollimport-Erfolg unabhängig von späteren Delta-Fehlern behandeln.
+- DE: Abgleichstart und Updater abstimmen, Installer/Quellen auf denselben Commit festlegen,
+  nur Laufzeitdateien installieren und verspätete GUI-Antworten nach Abmeldung verwerfen.
+  GUI-Testhinweis entfernen, Anleitungen überarbeiten und Docker-/statische Prüfungen ergänzen.
+
 ## 0.1.8
 
 - EN: Lower the GUI password minimum to eight characters in backend validation,

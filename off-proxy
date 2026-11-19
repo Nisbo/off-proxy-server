@@ -6,6 +6,7 @@ ROOT=${OFF_PROXY_DIR:-/opt/off-proxy-server}
 BIN_DIR=${OFF_PROXY_BIN_DIR:-/usr/local/bin}
 LEGACY_DIR=${OFF_PROXY_LEGACY_DIR:-/opt/off-local-api}
 TEMP=
+MAINTENANCE_SOURCE=
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 require_root() { [[ $(id -u) == 0 ]] || die 'Run as root / Als root ausführen.'; }
@@ -15,6 +16,7 @@ prerequisites() {
   docker compose version >/dev/null
 }
 cleanup() {
+  release_maintenance
   if [[ -n $TEMP && $TEMP == "$ROOT"/.stage.* && -d $TEMP ]]; then rm -rf -- "$TEMP"; fi
 }
 trap cleanup EXIT
@@ -60,6 +62,7 @@ check_import_idle() {
   local source=$1 result=0 running
   running=$(compose_at "$source" ps --status running -q sync)
   [[ -n $running ]] || return 0
+  # shellcheck disable=SC2016 # MongoDB operators must not be expanded by the shell.
   compose_at "$source" exec -T api python -c '
 import os, sys
 from pymongo import MongoClient
@@ -70,21 +73,61 @@ sys.exit(75 if busy else 0)' || result=$?
   [[ $result == 0 ]] || die 'Update deferred. Wait for the import to finish; nothing restarted.'
 }
 
+acquire_maintenance() {
+  local source=$1
+  # This update gate and the worker's cycle claim share one atomic scheduler row.
+  # shellcheck disable=SC2016 # MongoDB operators must not be expanded by the shell.
+  compose_at "$source" exec -T api python -c '
+import os, sys, time
+from pymongo import MongoClient
+db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
+db.scheduler.update_one({"_id":"sync"},{"$setOnInsert":{"phase":"waiting"}},upsert=True)
+result=db.scheduler.update_one({"_id":"sync","phase":{"$ne":"running"}},
+    {"$set":{"maintenance_until":time.time()+600}})
+if not result.matched_count: sys.exit(75)' || die 'Update deferred: synchronization started; nothing stopped.'
+  MAINTENANCE_SOURCE=$source
+  check_import_idle "$source"
+}
+release_maintenance() {
+  [[ -n $MAINTENANCE_SOURCE ]] || return 0
+  # shellcheck disable=SC2016 # MongoDB operators must not be expanded by the shell.
+  compose_at "$MAINTENANCE_SOURCE" exec -T api python -c '
+import os
+from pymongo import MongoClient
+db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
+db.scheduler.update_one({"_id":"sync"},{"$unset":{"maintenance_until":""}})' >/dev/null 2>&1 ||
+    printf 'Maintenance gate expires automatically within ten minutes.\n' >&2
+  MAINTENANCE_SOURCE=
+}
+
 fetch_release() {
   TEMP=$(mktemp -d "$ROOT/.stage.XXXXXX")
-  curl -fsSL --retry 2 --connect-timeout 15 --max-time 90 \
+  if [[ -n ${1:-} ]]; then
+    RELEASE=$1
+  else
+  curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 90 \
     https://api.github.com/repos/Nisbo/off-proxy-server/commits/main -o "$TEMP/commit.json"
-  RELEASE=$(sed -nE 's/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/p' "$TEMP/commit.json" | head -n 1)
+  RELEASE=$(sed -nE '/^[[:space:]]*"sha":/ {s/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/;p;q;}' "$TEMP/commit.json")
+  fi
   [[ $RELEASE =~ ^[a-f0-9]{40}$ ]] || die 'GitHub did not return a valid commit.'
   if [[ ! -d $ROOT/releases/$RELEASE ]]; then
-    curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 \
+    curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 180 \
       "https://codeload.github.com/Nisbo/off-proxy-server/tar.gz/$RELEASE" -o "$TEMP/source.tar.gz"
     mkdir "$TEMP/source"
     tar -xzf "$TEMP/source.tar.gz" --no-same-owner --no-same-permissions \
       --strip-components=1 -C "$TEMP/source"
-    [[ -f $TEMP/source/app.py && -f $TEMP/source/compose.yaml && -f $TEMP/source/off-proxy ]] || die 'Incomplete source archive.'
     version_for "$TEMP/source" >/dev/null
-    mv "$TEMP/source" "$ROOT/releases/$RELEASE"
+    mkdir "$TEMP/runtime"
+    local name
+    for name in app.py dashboard.py control.py security.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy; do
+      [[ -f $TEMP/source/$name ]] || die "Incomplete source archive: $name"
+      cp -p "$TEMP/source/$name" "$TEMP/runtime/$name"
+    done
+    [[ -f $TEMP/source/web/index.html && -f $TEMP/source/web/dashboard.js && -f $TEMP/source/web/dashboard.css ]] || die 'Incomplete web assets.'
+    cp -Rp "$TEMP/source/web" "$TEMP/runtime/web"
+    chmod -R u=rwX,go=rX "$TEMP/runtime/web"
+    [[ ! -f $TEMP/source/LICENSE ]] || cp -p "$TEMP/source/LICENSE" "$TEMP/runtime/LICENSE"
+    mv "$TEMP/runtime" "$ROOT/releases/$RELEASE"
   fi
   cleanup; TEMP=
 }
@@ -105,8 +148,8 @@ api_exec() {
 }
 
 wait_api() {
-  local source=$1 expected=$2 attempt
-  for attempt in {1..15}; do
+  local source=$1 expected=$2 _attempt
+  for _attempt in {1..15}; do
     if api_exec "$source" 'r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
 with urllib.request.urlopen(r,timeout=5) as response:
     sys.exit(0 if json.load(response)["version"]==sys.argv[1] else 1)' "$expected" >/dev/null 2>&1; then return 0; fi
@@ -142,8 +185,10 @@ activate() {
   [[ -z $old ]] || check_import_idle "$(source_for "$old")"
   # Build first so a failed download/build cannot stop the existing service.
   compose_at "$source" build api
-  [[ -z $old ]] || check_import_idle "$(source_for "$old")"
-  if [[ -n $old ]]; then compose_at "$(source_for "$old")" stop sync; fi
+  if [[ -n $old ]]; then
+    acquire_maintenance "$(source_for "$old")"
+    compose_at "$(source_for "$old")" stop sync
+  fi
   local result=0
   compose_at "$source" up -d --no-build || result=$?
   if [[ $result != 0 ]] || ! wait_api "$source" "$expected"; then
@@ -156,6 +201,7 @@ activate() {
     fi
     die 'New API failed to start. Data and credentials retained; inspect Docker logs.'
   fi
+  release_maintenance
   [[ -z $old || $next == "$old" ]] || write_pointer previous "$old"
   write_pointer current "$next"
   install_command "$source"
@@ -180,6 +226,7 @@ prepare_install() {
     [[ $version =~ ^0\.1\.[012]$ ]] || die 'Unknown prototype version. No existing services changed.'
     printf '%s\n' "$version" > "$ROOT/releases/legacy/VERSION"
     # Normalize only the backup's build context for rollback. Runtime paths stay old.
+    # shellcheck disable=SC2016 # Preserve the literal Compose variable in the backup.
     sed 's/^  build: \.$/  build:\n    context: ${OFF_PROXY_SOURCE_DIR:-.}/' \
       "$RUNTIME/compose.yaml" > "$ROOT/releases/legacy/compose.yaml"
     printf '*\n!app.py\n!Dockerfile\n!requirements.txt\n' > "$ROOT/releases/legacy/.dockerignore"
@@ -258,7 +305,7 @@ main() {
     ROOT=${2:-$ROOT}; prepare_install
     old=$(cat "$ROOT/.state/current" 2>/dev/null || true)
     [[ -z $old ]] || check_import_idle "$(source_for "$old")"
-    fetch_release
+    fetch_release "${OFF_PROXY_BOOTSTRAP_COMMIT:-}"
     if [[ $old == "$RELEASE" ]]; then install_command "$(source_for "$old")"; printf 'Already current.\n'; password_setup install; return; fi
     activate "$RELEASE" "$old"
     password_setup install

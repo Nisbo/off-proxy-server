@@ -5,4 +5,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py dashboard.py control.py security.py ./
 COPY web ./web
 ENV PYTHONUNBUFFERED=1
+USER 65532:65532
 CMD ["python", "app.py", "api"]

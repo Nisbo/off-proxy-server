@@ -2,3 +2,8 @@
 pytest==9.2.0
 mongomock==4.3.0
 PyYAML==6.0.3
+coverage==7.17.3
+ruff==0.17.5
+bandit==1.9.4
+shellcheck-py==0.11.0.1
+pip-audit==2.10.1
