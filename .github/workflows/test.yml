@@ -22,15 +22,15 @@ jobs:
         run: pip-audit -r requirements.txt
       - name: Static and shell checks
         run: |
-          ruff check app.py control.py dashboard.py security.py --select F,E9
-          bandit -q app.py control.py dashboard.py security.py
+          ruff check app.py components.py control.py dashboard.py security.py --select F,E9
+          bandit -q app.py components.py control.py dashboard.py security.py
           shellcheck off-proxy install.sh
       - name: Unit, local HTTP and management tests
         run: |
-          coverage run --branch --source=app,control,dashboard,security -m pytest -q
+          coverage run --branch --source=app,components,control,dashboard,security -m pytest -q
           coverage report -m
       - name: Real MongoDB integration tests
-        run: python -m pytest -q test_app.py test_security.py
+        run: python -m pytest -q test_app.py test_security.py test_components.py
         env:
           MONGO_TEST_URI: mongodb://127.0.0.1:27017/
       - name: Shell and Compose validation

@@ -23,7 +23,7 @@ def installation(tmp_path):
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path / "local-bin"),
                OFF_PROXY_LEGACY_DIR=str(tmp_path / "legacy"),
-               FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40)
+               OFF_PROXY_DISABLE_HOST_AGENT='1', FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40)
     programs = {
         "id": "#!/bin/sh\necho 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
@@ -45,7 +45,7 @@ if a[:2]==['compose','version'] or a[:1]==['ps']:sys.exit(0)
 if a[:1]==['inspect']:
     print('sha256:'+'a'*64);sys.exit(0)
 if a[:2]==['image','inspect']:
-    print('mongo@sha256:'+'b'*64 if 'RepoDigests' in a[3] else 'sha256:'+'a'*64)
+    print(('python@sha256:' if 'python' in a[-1] else 'mongo@sha256:')+'b'*64 if 'RepoDigests' in a[3] else 'sha256:'+'a'*64)
     sys.exit(0)
 if a[:1]==['pull']:sys.exit(1 if os.environ.get('FAKE_PULL_FAIL')=='1' else 0)
 if '-f' not in a:sys.exit(9)
@@ -73,7 +73,7 @@ sys.exit(0)
 
     def archive(release):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "dashboard.py", "control.py", "security.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
+            for name in ("app.py", "dashboard.py", "control.py", "security.py", "components.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
                 data = (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)
@@ -278,6 +278,7 @@ def test_runtime_install_excludes_tests_and_development_files(installation):
     root, env, log, run = installation
     assert run('install').returncode == 0
     source = root/'releases'/('a'*40)
+    assert not list(source.glob('test*'))
     assert not (source/'test_app.py').exists()
     assert not (source/'requirements-dev.txt').exists()
     assert not (source/'.github').exists()
@@ -412,3 +413,21 @@ def test_components_update_can_start_a_stopped_stack(installation):
     assert run('install').returncode == 0
     assert run('components-update', FAKE_RUNNING='0').returncode == 0
     assert (root/'.state'/('image-'+'a'*40)).exists()
+
+
+def test_installer_sets_up_request_only_systemd_host_agent(installation):
+    root, env, log, run = installation
+    service_dir=root.parent/'units'
+    systemctl=Path(env['PATH'].split(os.pathsep)[0])/'systemctl'
+    systemctl.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG.systemd"\n')
+    systemctl.chmod(0o755)
+    result=run('install', OFF_PROXY_DISABLE_HOST_AGENT='0', OFF_PROXY_TEST_SYSTEMD='1', OFF_PROXY_SERVICE_DIR=str(service_dir))
+    assert result.returncode == 0, result.stderr
+    units=list(service_dir.glob('*.service'))
+    assert len(units)==1
+    content=units[0].read_text()
+    assert 'components-worker' in content and 'NoNewPrivileges=true' in content
+    assert 'OnCalendar' not in content and 'components-update' not in content
+    assert not list(service_dir.glob('*.timer'))
+    assert 'enable ' in Path(str(log)+'.systemd').read_text()
+    assert 'restart ' in Path(str(log)+'.systemd').read_text()

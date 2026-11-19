@@ -641,3 +641,5 @@ dialog::backdrop { background:rgb(0 0 0 / 70%); }
 
 #access-dialog .check-row { color:var(--text); }
 #access-dialog #public-api-consent,#access-dialog #key-change-consent { color:var(--warning); }
+
+.components-rows{display:grid;gap:14px}.component-row{padding:18px;border:1px solid var(--border,#324454);border-radius:14px}.component-row h3{margin:0 0 10px}.component-row p{margin:0 0 12px;overflow-wrap:anywhere}#components-state{overflow-wrap:anywhere}#components-check,#components-update{white-space:normal}

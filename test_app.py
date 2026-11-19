@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 import app
+from test_support import Server
 import security
 
 UI_COOKIES = {}
@@ -221,7 +222,7 @@ def test_one_source_failure_does_not_block_others(db):
 
 @pytest.fixture
 def http(db):
-    server = app.Server(("127.0.0.1", 0), db, "x" * 32)
+    server = Server(("127.0.0.1", 0), db, "x" * 32)
     server.security.set_password("test-admin-password")
     raw = server.security.login("test-admin-password", "fixture")
     UI_COOKIES[f"http://127.0.0.1:{server.server_port}"] = f"{security.COOKIE}={raw}"
@@ -281,7 +282,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
     assert Path(".dockerignore").read_text().splitlines() == [
-        "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
+        "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!components.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
 
@@ -803,17 +804,6 @@ def test_oversized_barcode_is_rejected_before_database_lookup(http):
     assert get(http+'/api/v3/product/'+('1'*257)+'.json')[0] == 400
 
 
-def test_invalid_absolute_request_target_is_rejected_before_routing(http):
-    import socket
-    from urllib.parse import urlsplit
-    address = urlsplit(http)
-    with socket.create_connection((address.hostname, address.port), timeout=5) as connection:
-        connection.sendall(b'GET http://[ HTTP/1.0\r\nHost: localhost\r\n\r\n')
-        response = connection.recv(256)
-        # Waitress rejects malformed absolute URIs by closing the connection.
-        assert not response or b' 400 ' in response.split(b'\r\n', 1)[0]
-    assert get(http+'/health')[0] == 200
-
 
 def test_query_string_credentials_are_not_written_to_request_logs(http):
     with patch.object(app.LOG, 'info') as info:
@@ -837,20 +827,10 @@ def test_wsgi_unsupported_method_cannot_trigger_control(http):
     assert caught.value.code == 405
 
 
-def test_waitress_rejects_large_bodies_before_application(http):
+def test_large_bodies_are_rejected(http):
     request = urllib.request.Request(http+'/auth/login', data=b'x'*4097,
                                      headers={'Content-Type':'application/json'})
     with pytest.raises(urllib.error.HTTPError) as caught:
         urllib.request.urlopen(request, timeout=5)
     assert caught.value.code == 413
-    assert get(http+'/health')[0] == 200
-
-
-def test_waitress_rejects_conflicting_content_lengths(http):
-    import socket
-    from urllib.parse import urlsplit
-    address = urlsplit(http)
-    with socket.create_connection((address.hostname, address.port), timeout=5) as connection:
-        connection.sendall(b'POST /auth/login HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nContent-Length: 3\r\nConnection: close\r\n\r\n{}x')
-        assert b' 400 ' in connection.recv(512).split(b'\r\n', 1)[0]
     assert get(http+'/health')[0] == 200

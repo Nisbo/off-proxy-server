@@ -99,10 +99,10 @@ off-proxy components-update
 
 This rebuilds the **currently installed source**, even if its commit has not changed.
 It pulls the latest published Python 3.13 container base (including its Linux
-packages), installs the latest compatible Waitress **3.0.x**, and refreshes MongoDB
+packages), installs the latest compatible Gunicorn **27.x**, and refreshes MongoDB
 within **8.0.x**. PyMongo stays pinned to the version tested with the application.
 It does not update the host's Debian, Docker, your reverse proxy, or our application
-code. A new Python/MongoDB/Waitress version series requires an application update.
+code. A new Python/MongoDB/Gunicorn version series requires an application update.
 There are **no automatic component updates** and no scheduled update job.
 
 Downloads and the replacement build finish before services stop. Active imports
@@ -115,12 +115,42 @@ update does not request a full import. Software rollback does not undo a success
 component update or restore database files: make a database backup beforehand.
 If interrupted, rerun the command; do not delete `.state` or database directories.
 
-The API and GUI now run on **Waitress**, a production WSGI server, instead of
+The API and GUI now run on **Gunicorn**, a production WSGI server, instead of
 Python's development HTTP server. Requests and connections are bounded; the image
 still runs without root privileges. HTTPS remains the responsibility of your
 reverse proxy. `X-Forwarded-Proto: https` is retained solely as the existing Secure
 cookie hint; forwarded client addresses and hosts are not trusted for identity or
 access checks. The proxy must preserve `Host` and overwrite the protocol header.
+
+### Component updates in the GUI
+
+**Components** opens installed Python, Gunicorn and MongoDB versions, update
+availability, the last check, and the current/last action. **Check for updates**
+compares published Gunicorn 27.x releases and the upstream Python/MongoDB image
+digests with the actual installed images. Missing build provenance or an unreachable
+source is shown as **unknown**, never as up to date. Python/Linux changes are
+reported as an image update; its exact new Python version is known after installation.
+The application version remains visible in the page header; this action does not
+check for or install new application code.
+
+**Update components…** requires another explicit confirmation. It shows download,
+build, restart and verification stages. An open page reconnects after the short
+restart; the existing login session survives. Imports defer updates; interrupted,
+expired and failed requests need a new user action. Repeated clicks are coalesced.
+A refresh, login, service start or boot **never schedules an update or a network
+update check**. After an explicitly requested update, its result is checked once.
+
+The installer/updater automatically installs a project-specific systemd host service
+on supported Docker hosts. It polls only for explicit, authenticated requests and
+runs fixed management commands. The GUI container has **no Docker socket or host
+filesystem access**. Host Debian needs no additional Python environment. If systemd
+is absent or the helper cannot start, the GUI explains that host actions are unavailable;
+the CLI still works. To retry installation: `off-proxy host-agent install`.
+The unit name is `off-proxy-components-<installation-id>.service`; inspect it with
+`systemctl status 'off-proxy-components-*'`. Diagnostic output is kept locally in
+`.state/components.log` (last job, at most 1 MiB after completion), not exposed in
+the GUI. The helper does not start the Docker stack when it is stopped. A container
+restart policy and helper restart policy restart services only; they do not update software.
 
 ## Dashboard and access
 

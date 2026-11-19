@@ -27,7 +27,7 @@ def test_real_install_update_rotation_and_rollback(tmp_path):
     newer = version.rsplit('.', 1)[0]+'.'+str(int(version.rsplit('.', 1)[1])+1)
     for commit, target_version in [('a'*40, version), ('b'*40, newer)]:
         with tarfile.open(remote/(commit+'.tar.gz'), 'w:gz') as archive:
-            for name in ('app.py','control.py','dashboard.py','security.py','VERSION','compose.yaml','Dockerfile','.dockerignore','requirements.txt','off-proxy','web/index.html','web/dashboard.js','web/dashboard.css'):
+            for name in ('app.py','control.py','dashboard.py','security.py','components.py','VERSION','compose.yaml','Dockerfile','.dockerignore','requirements.txt','off-proxy','web/index.html','web/dashboard.js','web/dashboard.css'):
                 body = (SOURCE/name).read_bytes()
                 if name in ('app.py','VERSION'):
                     body = body.replace(version.encode(), target_version.encode())
@@ -45,7 +45,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
     env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ['PATH'],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path/'bin'),
                OFF_PROXY_LEGACY_DIR=str(tmp_path/'not-a-legacy-install'),
-               SMOKE_COMMIT='a'*40, SMOKE_ARCHIVES=str(remote))
+               OFF_PROXY_DISABLE_HOST_AGENT='1', SMOKE_COMMIT='a'*40, SMOKE_ARCHIVES=str(remote))
     def manage(*args, commit='a'*40):
         result = subprocess.run(['bash', str(SOURCE/'off-proxy'), *args], env=dict(env, SMOKE_COMMIT=commit),
                                 text=True, capture_output=True, timeout=300)
@@ -65,6 +65,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
                 return
             time.sleep(0.2)
         raise AssertionError('worker did not become idle')
+    agent = None
     try:
         manage('install')
         initial_env = (root/'.env').read_bytes()
@@ -87,7 +88,32 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         assert client.call('/ui/status')[0] == 200  # Session survived replacement.
         wait_idle(client)
         source_before = (root/'.state/current').read_text()
-        manage('components-update',commit='b'*40)
+        agent_log=(tmp_path/'agent.log').open('w')
+        agent=subprocess.Popen(['bash',str(root/'off-proxy'),'components-worker'],env=env,stdout=agent_log,stderr=agent_log)
+        for _ in range(60):
+            if client.call('/ui/components')[1]['agent_available']: break
+            time.sleep(.5)
+        else: raise AssertionError('host agent did not become available')
+        assert client.call('/ui/components')[1]['checked_at'] is None  # No automatic network checks.
+        assert client.call('/ui/components/update', {'confirmed':True})[1]['queued'] is True
+        deadline=time.monotonic()+300
+        while time.monotonic() < deadline:
+            try:
+                state=client.call('/ui/components')[1]
+                if state['status'] not in ('pending','running'):
+                    assert state['status']=='success', state
+                    break
+            except (OSError, __import__('urllib.error',fromlist=['URLError']).URLError):
+                pass  # Expected short outage while the API/MongoDB restart.
+            time.sleep(1)
+        else: raise AssertionError('GUI component update did not complete')
+        assert len(state['rows']) == 3
+        assert all(row['installed'] for row in state['rows'])
+        job=state['job']
+        time.sleep(6)
+        assert client.call('/ui/components')[1]['job']==job  # No scheduled follow-up update.
+        agent.terminate(); agent.wait(timeout=20); agent=None
+        agent_log.close()
         assert (root/'.state/current').read_text() == source_before
         assert (root/'.env').read_bytes() == initial_env
         assert (root/'.state'/('image-'+'b'*40)).read_text().strip().startswith('b'*40+'-components-')
@@ -112,5 +138,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
             print(diagnostic.stdout, diagnostic.stderr)
         raise
     finally:
+        if agent is not None:
+            agent.terminate(); agent.wait(timeout=20)
         if (root/'.env').exists() and (root/'releases'/('a'*40)/'compose.yaml').exists():
             compose('down')

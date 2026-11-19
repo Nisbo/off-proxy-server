@@ -105,11 +105,11 @@ off-proxy components-update
 
 Der Befehl baut den **bereits installierten Programmstand** erneut, auch bei
 gleichem Commit. Er lädt die neueste veröffentlichte Python-3.13-Containerbasis
-samt Linux-Paketen, installiert die neueste passende Waitress-Version aus
-**3.0.x** und erneuert MongoDB innerhalb von **8.0.x**. PyMongo bleibt auf der mit
+samt Linux-Paketen, installiert die neueste passende Gunicorn-Version aus
+**27.x** und erneuert MongoDB innerhalb von **8.0.x**. PyMongo bleibt auf der mit
 unserem Programm getesteten Version. Debian und Docker auf dem Host, ein eigener
 Reverse Proxy und unser Programmcode werden damit nicht aktualisiert. Neue
-Versionsreihen von Python, MongoDB oder Waitress benötigen ein Programmupdate.
+Versionsreihen von Python, MongoDB oder Gunicorn benötigen ein Programmupdate.
 Es gibt **keine automatischen Komponenten-Updates** und keinen Update-Zeitplan.
 
 Download und Build werden vor dem Stoppen abgeschlossen. Ein laufender Import
@@ -124,13 +124,48 @@ und stellt keine Datenbankdateien zurück: vorher eine Datenbanksicherung erstel
 Nach einer Unterbrechung den Befehl erneut ausführen; `.state` und Datenverzeichnisse
 nicht löschen.
 
-API und GUI verwenden jetzt **Waitress**, einen für den Produktivbetrieb ausgelegten
+API und GUI verwenden jetzt **Gunicorn**, einen für den Produktivbetrieb ausgelegten
 WSGI-Webserver, statt Pythons Entwicklungsserver. Anfragen und Verbindungen sind
 begrenzt; der Container läuft weiterhin ohne Rootrechte. HTTPS übernimmt weiterhin
 der Reverse Proxy. `X-Forwarded-Proto: https` dient ausschließlich wie bisher als
 Hinweis für Secure-Cookies. Weitergeleitete Client-Adressen und Hosts werden nicht
 für Identität oder Zugriffskontrollen übernommen. Der Proxy muss `Host` erhalten
 und den Protokoll-Header selbst setzen.
+
+### Komponenten-Updates in der GUI
+
+**Komponenten** öffnet installierte Python-, Gunicorn- und MongoDB-Versionen,
+Update-Verfügbarkeit, die letzte Prüfung und die aktuelle/letzte Aktion.
+**Nach Updates suchen** vergleicht veröffentlichte Gunicorn-27.x-Versionen und die
+Python-/MongoDB-Image-Digests mit den tatsächlich installierten Images. Fehlende
+Build-Herkunft oder nicht erreichbare Quellen werden als **unbekannt** angezeigt,
+niemals als aktuell. Änderungen der Python-/Linux-Basis erscheinen als Image-Update;
+die genaue neue Python-Version steht erst nach der Installation fest. Die
+Programmversion bleibt im Seitenkopf sichtbar; neuer Programmcode wird hier weder
+geprüft noch installiert.
+
+**Komponenten aktualisieren …** verlangt eine zusätzliche ausdrückliche Bestätigung.
+Download, Build, Neustart und Prüfung werden angezeigt. Die geöffnete Seite verbindet
+sich nach dem kurzen Neustart wieder; die bestehende Anmeldung bleibt erhalten.
+Laufende Importe stellen Updates zurück. Unterbrochene, abgelaufene oder gescheiterte
+Aufträge benötigen eine neue Benutzeraktion. Mehrfachklicks werden zusammengefasst.
+Anzeige aktualisieren, Anmeldung, Dienststart und Booten planen **niemals ein Update
+oder eine Netzwerkprüfung**. Nach einem ausdrücklich gestarteten Update wird das
+Ergebnis einmal geprüft.
+
+Installer/Updater richten auf unterstützten Docker-Hosts automatisch einen eigenen
+systemd-Host-Dienst ein. Er wartet ausschließlich auf ausdrücklich bestätigte,
+authentifizierte Aufträge und führt festgelegte Verwaltungsbefehle aus. Der
+GUI-Container bekommt **keinen Docker-Socket und keinen Zugriff auf Host-Dateien**.
+Debian benötigt dafür keine zusätzliche Python-Umgebung. Ohne systemd oder bei
+fehlgeschlagenem Dienststart erklärt die GUI, dass Host-Aktionen nicht verfügbar
+sind; die CLI funktioniert weiterhin. Einrichtung erneut versuchen:
+`off-proxy host-agent install`.
+Die Unit heißt `off-proxy-components-<Installations-ID>.service`; prüfen mit
+`systemctl status 'off-proxy-components-*'`. Diagnoseausgaben bleiben lokal in
+`.state/components.log` (letzter Auftrag, nach Abschluss maximal 1 MiB), nicht in
+der GUI. Der Helfer startet keinen gestoppten Docker-Stack. Neustartregeln für
+Container und Helfer starten nur Dienste neu; sie aktualisieren keine Software.
 
 ## Oberfläche und Zugriff
 

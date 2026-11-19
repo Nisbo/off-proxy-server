@@ -21,8 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from waitress.server import create_server
-from waitress import wasyncore
+from gunicorn.app.base import BaseApplication
 
 from bson import json_util
 from pymongo import MongoClient
@@ -30,8 +29,9 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
 import security
+import components
 
-VERSION = "0.1.10"
+VERSION = "0.1.11"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -478,32 +478,22 @@ def lookup(db, code, kind, language, fields=None):
                              "message": {"id": "product_not_found", "name": "", "lc_name": ""}}]}
 
 
-class Server:
-    """Application state and a bounded production WSGI server."""
+class Application:
+    """Shared WSGI routes, independent of the HTTP server."""
 
-    def __init__(self, address, db, token):
+    def __init__(self, db, token):
         self.db = db
         self.security = security.Security(db, token)
         self.dashboard = Dashboard(db, VERSION, PROJECTS)
         self.control_nonce = secrets.token_urlsafe(32)
-        self._stop = threading.Event()
-        self._closed = threading.Event()
-        self._map = {}
-        self.http = create_server(
-            self.application, host=address[0], port=address[1], map=self._map,
-            threads=8, connection_limit=32, backlog=16, channel_timeout=15,
-            cleanup_interval=5, max_request_header_size=16384,
-            max_request_body_size=4096, expose_tracebacks=False,
-            # Preserve only the existing HTTPS cookie hint. Never use forwarded
-            # addresses/hosts for access checks or client identity.
-            clear_untrusted_proxy_headers=False, ident="OFF Proxy Server",
-        )
-        self.server_port = self.http.effective_port
 
     def application(self, environ, start_response):
         request = Request(self, environ)
         try:
-            if request.command in ("GET", "HEAD"):
+            length = environ.get("CONTENT_LENGTH") or "0"
+            if not length.isdigit() or int(length) > 4096:
+                request.send_json(413, {"error": "request_too_large"})
+            elif request.command in ("GET", "HEAD"):
                 request.do_GET()
             elif request.command == "POST":
                 request.do_POST()
@@ -517,25 +507,34 @@ class Server:
         start_response(f"{request.status} {HTTPStatus(request.status).phrase}", request.response_headers)
         return [b"" if request.command == "HEAD" else request.body]
 
-    def serve_forever(self):
-        try:
-            while not self._stop.is_set():
-                wasyncore.loop(timeout=0.1, count=1, map=self._map)
-        finally:
-            self.http.task_dispatcher.shutdown(timeout=10)
-            wasyncore.close_all(map=self._map)
-            self._closed.set()
 
-    def shutdown(self):
-        self._stop.set()
-        self._closed.wait(15)
 
-    def server_close(self):
-        self.http.close()
+class Gunicorn(BaseApplication):
+    def load_config(self):
+        options = dict(bind="0.0.0.0:8080", workers=1, worker_class="gthread", threads=8,
+                       worker_connections=32, backlog=16, timeout=30, graceful_timeout=30,
+                       keepalive=5, limit_request_line=8190, limit_request_fields=64,
+                       limit_request_field_size=8190, forwarded_allow_ips="",
+                       secure_scheme_headers={}, control_socket_disable=True,
+                       accesslog=None, errorlog="-", worker_tmp_dir="/tmp")  # nosec B108 # Private container tmpfs; Gunicorn creates secure temporary files.
+        for name, value in options.items():
+            self.cfg.set(name, value)
+
+    def load(self):
+        # Create MongoClient after fork; one threaded worker keeps login throttling
+        # and the anonymous login nonce consistent across requests.
+        return create_app().application
+
+
+def create_app():
+    token = os.environ.get("API_TOKEN", "")
+    if len(token) < 24:
+        raise ValueError("API_TOKEN must contain at least 24 characters")
+    return Application(database(), token)
 
 
 class Request:
-    """Routes consume WSGI requests; Waitress owns HTTP parsing and sockets."""
+    """Routes consume WSGI requests; Gunicorn owns HTTP parsing and sockets."""
 
     def __init__(self, server, environ):
         self.server = server
@@ -590,6 +589,9 @@ class Request:
             return True
         if parsed.path.startswith("/ui/") and not session:
             self.send_json(401, {"error": "authentication_required"})
+            return True
+        if parsed.path == "/ui/components":
+            self.send_json(200, components.snapshot(self.server.db))
             return True
         if parsed.path == "/ui/security":
             self.send_json(200, self.server.security.public_settings())
@@ -716,6 +718,11 @@ class Request:
                 self.send_json(200, {"ok": True}, self.session_cookie())
             elif path == "/ui/security":
                 self.send_json(200, self.server.security.save(values))
+            elif path in ("/ui/components/check", "/ui/components/update"):
+                action = "check" if path.endswith("/check") else "update"
+                if (action == "check" and values) or (action == "update" and (set(values) != {"confirmed"} or values["confirmed"] is not True)):
+                    raise ValueError("Explicit confirmation required")
+                self.send_json(202, {"queued": components.request(self.server.db, action)})
             elif path == "/ui/settings":
                 self.send_json(200, {"settings": control.save_settings(self.server.db, values)})
             elif path == "/ui/sync" and not values:
@@ -742,7 +749,7 @@ class Request:
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     mode = sys.argv[1] if len(sys.argv) > 1 else "api"
-    db = database()
+    db = database() if mode != "api" else None
     if mode in ("sync", "sync-once"):
         signal.signal(signal.SIGTERM, lambda *_: STOP.set())
         signal.signal(signal.SIGINT, lambda *_: STOP.set())
@@ -764,10 +771,7 @@ def main():
     token = os.environ.get("API_TOKEN", "")
     if len(token) < 24:
         raise SystemExit("API_TOKEN must contain at least 24 characters")
-    server = Server(("0.0.0.0", 8080), db, token)  # nosec B104 # Host binding is controlled by BIND_IP.
-    signal.signal(signal.SIGTERM, lambda *_: server._stop.set())
-    signal.signal(signal.SIGINT, lambda *_: server._stop.set())
-    server.serve_forever()
+    Gunicorn().run()
 
 
 if __name__ == "__main__":

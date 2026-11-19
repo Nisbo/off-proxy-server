@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import app
+from test_support import Server
 import security
 from test_app import db, publish
 
@@ -51,7 +52,7 @@ class Client:
 
 @pytest.fixture
 def secured(db):
-    server = app.Server(('127.0.0.1', 0), db, KEY)
+    server = Server(('127.0.0.1', 0), db, KEY)
     server.security.set_password(PASSWORD)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

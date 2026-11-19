@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.11
+
+- EN: Replace Waitress with Gunicorn 27.x, one bounded threaded worker, no
+  exposed Gunicorn control socket, and database initialization after fork.
+- EN: Add authenticated DE/EN component dialogs, explicit update confirmation,
+  installed versions, manual update checks, progress and reconnect support.
+- EN: Install a systemd host request agent without exposing Docker to the GUI;
+  pin Python build provenance, compare upstream images/releases, preserve data,
+  sessions, settings and API keys. No automatic checks or updates.
+- DE: Waitress durch Gunicorn 27.x ersetzt; begrenzter Thread-Worker, kein
+  Gunicorn-Steuerungssocket und Datenbankinitialisierung nach dem Fork.
+- DE: Geschützte DE/EN-Komponentenverwaltung mit Bestätigung, installierten
+  Versionen, manueller Update-Prüfung, Fortschritt und Wiederverbindung ergänzt.
+- DE: systemd-Host-Dienst für explizite Aufträge ohne Docker-Zugriff der GUI;
+  Python-Build-Herkunft und veröffentlichte Images/Releases vergleichen.
+  Daten, Sitzungen, Einstellungen und Schlüssel bleiben erhalten. Keine
+  automatischen Prüfungen oder Updates.
+
 ## 0.1.10
 
 - EN: Replace the development HTTP server with bounded Waitress WSGI serving;

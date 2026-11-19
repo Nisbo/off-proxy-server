@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.9">
-  <script defer src="/assets/dashboard.js?v=0.1.9"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.11">
+  <script defer src="/assets/dashboard.js?v=0.1.11"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.9</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.11</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -43,7 +43,7 @@
       <p id="connection-error" class="error-message" role="status" hidden></p>
     </section>
     <section aria-labelledby="dataset-heading">
-      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><div class="control-actions"><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh display</button><button class="primary" id="sync" type="button" disabled data-i18n="syncNow">Synchronize now</button><button class="secondary" id="access" type="button" disabled data-i18n="access">Access &amp; API</button><button class="secondary" id="settings" type="button" disabled data-i18n="settings">Settings</button></div></div>
+      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><div class="control-actions"><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh display</button><button class="primary" id="sync" type="button" disabled data-i18n="syncNow">Synchronize now</button><button class="secondary" id="access" type="button" disabled data-i18n="access">Access &amp; API</button><button class="secondary" id="components" type="button" disabled data-i18n="components">Components</button><button class="secondary" id="settings" type="button" disabled data-i18n="settings">Settings</button></div></div>
       <p id="control-message" role="status" hidden></p>
       <div id="dataset-grid" class="dataset-grid"></div>
     </section>
@@ -139,6 +139,27 @@
         <p id="full-error" class="error-message" role="status" hidden></p>
       </div>
       <footer class="dialog-footer control-actions"><button class="secondary" id="full-cancel" type="button" data-i18n="cancel">Cancel</button><button class="primary" id="full-start" type="button" data-i18n="fullStart">Start full import</button></footer>
+    </div>
+  </dialog>
+  <dialog id="components-dialog" class="control-dialog" aria-labelledby="components-title">
+    <div class="dialog-content">
+      <header class="dialog-header"><div><p class="eyebrow" data-i18n="manualOnly">MANUAL UPDATES ONLY</p><h2 id="components-title" data-i18n="componentsTitle">Program &amp; components</h2></div><button class="secondary dialog-close" type="button" data-close="components-dialog" aria-label="Close">×</button></header>
+      <div class="dialog-body">
+        <p class="muted" data-i18n="componentsHelp">Checks do not install anything. Updates start only after your confirmation.</p>
+        <p id="components-state" role="status" aria-live="polite"></p>
+        <p id="components-agent" class="error-message" hidden data-i18n="component_agent_unavailable">The host service is unavailable. Install it with off-proxy host-agent install.</p>
+        <div id="components-rows" class="components-rows"></div>
+        <p class="muted" id="components-checked"></p>
+        <p id="components-error" class="error-message" role="status" hidden></p>
+      </div>
+      <footer class="dialog-footer control-actions"><button class="secondary" id="components-check" type="button" data-i18n="componentsCheck">Check for updates</button><button class="primary" id="components-update" type="button" data-i18n="componentsUpdate">Update components…</button></footer>
+    </div>
+  </dialog>
+  <dialog id="components-confirm" class="control-dialog" aria-labelledby="components-confirm-title">
+    <div class="dialog-content">
+      <header class="dialog-header"><h2 id="components-confirm-title" data-i18n="componentsConfirmTitle">Confirm component update</h2><button class="secondary dialog-close" type="button" data-close="components-confirm" aria-label="Close">×</button></header>
+      <div class="dialog-body"><p data-i18n="componentsConfirmText">Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.</p><p class="muted" data-i18n="componentsScope">Host Debian, Docker, reverse proxy and application code are not updated by this action.</p></div>
+      <footer class="dialog-footer control-actions"><button class="secondary" type="button" data-close="components-confirm" data-i18n="cancel">Cancel</button><button class="primary" id="components-start" type="button" data-i18n="componentsStart">Start update now</button></footer>
     </div>
   </dialog>
 </body>

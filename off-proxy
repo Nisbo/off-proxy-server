@@ -52,7 +52,7 @@ version_for() {
 }
 compose_images() {
   local source=$1 image_tag=$2 mongo_image=$3; shift 3
-  OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image \
+  OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
       -p "$PROJECT" -f "$source/compose.yaml" "$@"
 }
@@ -133,7 +133,7 @@ fetch_release() {
     version_for "$TEMP/source" >/dev/null
     mkdir "$TEMP/runtime"
     local name
-    for name in app.py dashboard.py control.py security.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy; do
+    for name in app.py dashboard.py control.py security.py components.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy; do
       [[ -f $TEMP/source/$name ]] || die "Incomplete source archive: $name"
       cp -p "$TEMP/source/$name" "$TEMP/runtime/$name"
       # Extraction uses umask 077; public code must remain readable inside non-root images.
@@ -203,7 +203,11 @@ activate() {
   compose_at "$source" config --quiet
   [[ -z $old ]] || check_import_idle "$(source_for "$old")"
   # Build first so a failed download/build cannot stop the existing service.
-  compose_at "$source" build api
+  docker pull python:3.13-slim
+  local python_base
+  python_base=$(docker image inspect --format '{{index .RepoDigests 0}}' python:3.13-slim)
+  [[ $python_base =~ ^python@sha256:[a-f0-9]{64}$ ]] || die 'Cannot identify Python base image.'
+  PYTHON_IMAGE_OVERRIDE=$python_base compose_at "$source" build api
   if [[ -n $old ]]; then
     acquire_maintenance "$(source_for "$old")"
     compose_at "$(source_for "$old")" stop sync
@@ -224,11 +228,12 @@ activate() {
   [[ -z $old || $next == "$old" ]] || write_pointer previous "$old"
   write_pointer current "$next"
   install_command "$source"
+  install_host_agent
   printf 'OFF Proxy Server %s ready. Delta checks run in the background; confirm full imports in the dashboard.\n' "$expected"
 }
 
 components_update() {
-  local source release old_tag old_mongo mongo_container next_tag next_mongo result=0
+  local source release old_tag old_mongo mongo_container next_tag next_mongo python_base result=0
   source=$(current_source); release=$(basename "$source")
   [[ $release != legacy && -f $source/security.py ]] || die 'Run off-proxy update first.'
   check_import_idle "$source"
@@ -243,17 +248,24 @@ components_update() {
   [[ $old_mongo =~ ^sha256:[a-f0-9]{64}$ ]] || die 'Cannot identify existing MongoDB image; nothing restarted.'
   write_pointer mongo-image "$old_mongo"
   next_tag="$release-components-$(date +%s)-$RANDOM"
-  printf 'Updating components only / Nur Komponenten aktualisieren: Python/Linux, Waitress 3.0.x, MongoDB 8.0.x.\n'
+  printf 'Updating components only / Nur Komponenten aktualisieren: Python/Linux, Gunicorn 27.x, MongoDB 8.0.x.\n'
   printf 'Application code and pinned libraries stay unchanged; services restart briefly. No automatic updates.\n'
   printf 'Programmcode und festgelegte Bibliotheken bleiben unverändert; kurzer Neustart. Keine automatischen Updates.\n'
   # Both downloads/builds finish before any service is stopped. Old app tags stay intact.
+  component_phase downloading
+  docker pull python:3.13-slim
+  python_base=$(docker image inspect --format '{{index .RepoDigests 0}}' python:3.13-slim)
+  [[ $python_base =~ ^python@sha256:[a-f0-9]{64}$ ]] || die 'Cannot identify Python base image.'
   docker pull mongo:8.0
   next_mongo=$(docker image inspect --format '{{index .RepoDigests 0}}' mongo:8.0)
   [[ $next_mongo =~ ^mongo@sha256:[a-f0-9]{64}$ ]] || die 'Cannot pin downloaded MongoDB image; nothing restarted.'
-  compose_images "$source" "$next_tag" "$next_mongo" build --pull --no-cache api
+  component_phase building
+  PYTHON_IMAGE_OVERRIDE=$python_base compose_images "$source" "$next_tag" "$next_mongo" build --pull --no-cache api
   acquire_maintenance "$source"
+  component_phase restarting
   compose_at "$source" stop sync
   compose_images "$source" "$next_tag" "$next_mongo" up -d --no-build --pull never || result=$?
+  component_phase verifying
   if [[ $result != 0 ]] || ! wait_api "$source" "$(version_for "$source")" "$next_tag" "$next_mongo"; then
     printf 'Component activation failed; restoring previous images / Bisherige Images werden wiederhergestellt.\n' >&2
     compose_images "$source" "$next_tag" "$next_mongo" stop sync || true
@@ -263,7 +275,108 @@ components_update() {
   write_pointer "image-$release" "$next_tag"
   write_pointer mongo-image "$next_mongo"
   release_maintenance
+  component_inventory || true
   printf 'Components updated / Komponenten aktualisiert. Application version / Programmversion: %s\n' "$(version_for "$source")"
+}
+
+# The host agent accepts only fixed actions; the web container has no Docker socket.
+component_exec() { compose_current exec -T sync python components.py "$@"; }
+component_phase() { component_exec phase "$1" >/dev/null 2>&1 || true; }
+component_inventory() {
+  local app_image app_container mongo_container base mongo
+  app_container=$(compose_current ps --all -q api)
+  app_image=$(docker inspect --format '{{.Image}}' "$app_container")
+  base=$(docker image inspect --format '{{index .Config.Labels "org.off-proxy.python-base"}}' "$app_image")
+  mongo_container=$(compose_current ps --all -q mongo)
+  mongo=$(docker inspect --format '{{.Image}}' "$mongo_container")
+  mongo=$(docker image inspect --format '{{index .RepoDigests 0}}' "$mongo")
+  component_exec inventory "$base" "$mongo"
+}
+agent_unit() {
+  printf 'off-proxy-components-%s.service' "$(printf '%s' "$ROOT" | cksum | cut -d' ' -f1)"
+}
+install_host_agent() {
+  local unit service_dir escaped
+  [[ ${OFF_PROXY_DISABLE_HOST_AGENT:-0} != 1 ]] || return 0
+  command -v systemctl >/dev/null || return 0
+  [[ -d /run/systemd/system || ${OFF_PROXY_TEST_SYSTEMD:-} == 1 ]] || {
+    printf 'GUI component actions need systemd / GUI-Komponentenaktionen benötigen systemd. CLI remains available.\n'; return 0;
+  }
+  unit=$(agent_unit)
+  if [[ ! -f $(current_source)/components.py ]]; then
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    return 0
+  fi
+  service_dir=${OFF_PROXY_SERVICE_DIR:-/etc/systemd/system}
+  mkdir -p "$service_dir"
+  escaped=${ROOT//\\/\\\\}; escaped=${escaped//\"/\\\"}; escaped=${escaped//%/%%}
+  cat > "$service_dir/$unit" <<EOF
+[Unit]
+Description=OFF Proxy component jobs (explicit user requests only)
+After=docker.service
+Requires=docker.service
+[Service]
+Type=simple
+Environment="OFF_PROXY_DIR=$escaped"
+ExecStart=/usr/bin/env bash "$escaped/off-proxy" components-worker
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths="$escaped"
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 644 "$service_dir/$unit"
+  systemctl daemon-reload && systemctl enable "$unit" && systemctl restart "$unit" ||
+    printf 'Host agent could not start; use off-proxy host-agent install / Host-Dienst konnte nicht starten.\n' >&2
+}
+components_worker() {
+  local action pid result ready=0
+  exec 8>"$ROOT/.state/agent.lock"
+  flock -n 8 || die 'Host agent already running.'
+  umask 077
+  while :; do
+    if ! component_exec heartbeat >/dev/null 2>&1; then sleep 5; continue; fi
+    if [[ $ready == 0 ]]; then
+      component_exec recover || { sleep 5; continue; }
+      component_inventory >/dev/null 2>&1 || true
+      ready=1
+    fi
+    action=$(component_exec claim) || { sleep 5; continue; }
+    case "$action" in
+      check|update)
+        (
+          if [[ $action == check ]]; then
+            component_inventory && component_exec check
+          else
+            "$ROOT/off-proxy" components-update && { component_exec check || true; }
+          fi
+        ) >"$ROOT/.state/components.log" 2>&1 &
+        pid=$!
+        while kill -0 "$pid" 2>/dev/null; do
+          sleep 5
+          component_exec heartbeat >/dev/null 2>&1 || true
+        done
+        result=success
+        wait "$pid" || result=failed
+        # Only codes are displayed; raw logs may include operational details.
+        if [[ $result == failed ]]; then
+          if grep -q 'Update deferred' "$ROOT/.state/components.log"; then result=deferred; fi
+        fi
+        until component_exec finish "$result"; do
+          sleep 5
+          component_exec heartbeat >/dev/null 2>&1 || true
+        done
+        tail -c 1048576 "$ROOT/.state/components.log" > "$ROOT/.state/components.log.new"
+        mv "$ROOT/.state/components.log.new" "$ROOT/.state/components.log"
+        ;;
+      '') ;;
+      *) die 'Invalid component job.' ;;
+    esac
+    sleep 5
+  done
 }
 
 prepare_install() {
@@ -355,7 +468,7 @@ password_setup() {
 main() {
   local action=${1:-help} old next
   if [[ $action == help || $action == --help ]]; then
-    printf 'off-proxy install|update|components-update|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
+    printf 'off-proxy install|update|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
     return
   fi
   require_root; prerequisites
@@ -378,6 +491,8 @@ main() {
       if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
       activate "$RELEASE" "$old"; password_setup ;;
     components-update) lock_operation; components_update ;;
+    components-worker) components_worker ;;
+    host-agent) [[ ${2:-} == install ]] || die 'Usage: off-proxy host-agent install'; install_host_agent ;;
     rollback)
       lock_operation; old=$(cat "$ROOT/.state/current")
       [[ -f $ROOT/.state/previous ]] || die 'No previous release saved.'
