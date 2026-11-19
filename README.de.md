@@ -125,8 +125,8 @@ Der Befehl baut den **bereits installierten Programmstand** erneut, auch bei
 gleichem Commit. Er lädt die neueste veröffentlichte Python-3.13-Containerbasis
 samt Linux-Paketen, installiert die neueste passende Gunicorn-Version aus
 **27.x** und erneuert MongoDB innerhalb von **8.0.x**. PyMongo bleibt auf der mit
-unserem Programm getesteten Version. Debian und Docker auf dem Host, ein eigener
-Reverse Proxy und unser Programmcode werden damit nicht aktualisiert. Neue
+dem Programm getesteten Version. Debian und Docker auf dem Host, ein eigener
+Reverse Proxy und der Programmcode werden damit nicht aktualisiert. Neue
 Versionsreihen von Python, MongoDB oder Gunicorn benötigen ein Programmupdate.
 Es gibt **keine automatischen Komponenten-Updates** und keinen Update-Zeitplan.
 

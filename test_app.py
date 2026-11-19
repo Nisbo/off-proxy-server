@@ -142,6 +142,57 @@ def test_image_urls_and_existing_url_preserved(db):
     assert p["image_front_thumb_url"] == "https://existing.test/image.jpg"
 
 
+@pytest.mark.parametrize("kind", list(app.PROJECTS))
+@pytest.mark.parametrize("language", ["de", "en"])
+def test_nested_dump_images_use_available_language_and_preserve_source(db, kind, language):
+    # Real 5000159384209 dump shape: the selected front image is Spanish only.
+    images = {"selected": {"front": {"es": {"imgid": "6", "rev": "28"}},
+                            "ingredients": {"es": {"imgid": "4", "rev": "32"}}},
+              "uploaded": {"6": {"sizes": {"100": {"h": 65, "w": 100}}}}}
+    p = product(code="5000159384209", lc="de", lang="de", images=images)
+    publish(db, kind, p)
+    original = db[kind + "_" + "a" * 32].find_one({"_id": p["code"]})
+    status, payload = app.lookup(db, p["code"], kind, language,
+                                 ["image_front_thumb_url", "image_front_url", "image_ingredients_small_url"])
+    root = f"https://images.{app.PROJECTS[kind]}.org/images/products/500/015/938/4209/"
+    assert status == 200
+    assert payload["product"]["image_front_thumb_url"] == root + "front_es.28.100.jpg"
+    assert payload["product"]["image_front_url"] == root + "front_es.28.400.jpg"
+    assert payload["product"]["image_ingredients_small_url"] == root + "ingredients_es.32.200.jpg"
+    assert db[kind + "_" + "a" * 32].find_one({"_id": p["code"]}) == original
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_image_language_priority_skips_bad_metadata_and_keeps_existing_urls(nested):
+    selected = {"de": {"rev": "8"}, "fr": {"rev": "7"}, "en": {"rev": "6"}}
+    def data():
+        return {"selected": {"front": selected}} if nested else {
+            f"front_{language}": info for language, info in selected.items()}
+    p = product(lc="fr", lang="en", images=data())
+    app.image_fields(p, "food", "de")
+    assert p["image_front_thumb_url"].endswith("front_de.8.100.jpg")
+    selected["de"]["rev"] = "../bad"
+    p = product(lc="fr", lang="en", images=data())
+    app.image_fields(p, "food", "de")
+    assert p["image_front_thumb_url"].endswith("front_fr.7.100.jpg")
+    p["image_front_thumb_url"] = "https://images.openfoodfacts.org/existing.jpg"
+    app.image_fields(p, "food", "en")
+    assert p["image_front_thumb_url"] == "https://images.openfoodfacts.org/existing.jpg"
+
+
+def test_only_uploaded_images_do_not_invent_a_front_selection():
+    p = product(images={"uploaded": {"1": {"rev": "7"}}})
+    app.image_fields(p, "food", "de")
+    assert "image_front_thumb_url" not in p
+
+
+def test_nested_image_paths_and_revisions_are_not_taken_from_untrusted_values():
+    p = product(images={"selected": {"front": {"../../wrong": {"rev": "1"},
+        "de": {"rev": "../../wrong"}, "es": {"rev": 28}}}})
+    app.image_fields(p, "food", "de")
+    assert p["image_front_thumb_url"].endswith("front_es.28.100.jpg")
+
+
 @pytest.mark.parametrize("deleted,kind", [(True, "food"), (False, "beauty")])
 def test_deleted_or_moved_records_not_returned(db, deleted, kind):
     publish(db, data=product(deleted=deleted, product_type=kind))
@@ -834,3 +885,18 @@ def test_large_bodies_are_rejected(http):
         urllib.request.urlopen(request, timeout=5)
     assert caught.value.code == 413
     assert get(http+'/health')[0] == 200
+
+
+def test_http_nested_image_metadata_is_resolved_before_fields_projection(db, http):
+    publish(db, data=product(code="5000159384209", lc="de", images={
+        "selected": {"front": {"es": {"imgid": "6", "rev": "28"}}},
+        "uploaded": {"6": {"sizes": {"100": {"h": 65, "w": 100}}}},
+    }))
+    for language in ("de", "en"):
+        status, payload = get(http + "/api/v3/product/5000159384209.json?"
+                              f"product_type=all&lc={language}&fields=code,image_front_thumb_url")
+        assert status == 200
+        assert payload["product"] == {
+            "code": "5000159384209",
+            "image_front_thumb_url": "https://images.openfoodfacts.org/images/products/500/015/938/4209/front_es.28.100.jpg",
+        }

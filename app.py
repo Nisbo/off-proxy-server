@@ -31,7 +31,7 @@ import control
 import security
 import components
 
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -413,34 +413,57 @@ def sync_loop(db, once=False):
                 "phase": "stopped", "active_kind": None, "next_check_epoch": None}})
 
 
+def _selected_image(images, role, languages):
+    """Read both dump schemas and fall back to another available translation."""
+    candidates = {}
+    for key, info in images.items():
+        if isinstance(key, str) and (key == role or key.startswith(role + "_")):
+            candidates[key] = info
+    selected = images.get("selected")
+    if isinstance(selected, dict) and isinstance(selected.get(role), dict):
+        for language, info in selected[role].items():
+            if isinstance(language, str):
+                candidates[f"{role}_{language}"] = info
+    # Requested language, product language, generic image, English, then another
+    # selected language. A Spanish-only front image is still useful in German.
+    preferred = [f"{role}_{language}" for language in languages if language]
+    preferred.extend((role, f"{role}_en"))
+    for key in dict.fromkeys([*preferred, *sorted(candidates)]):
+        info = candidates.get(key)
+        if not isinstance(info, dict) or not re.fullmatch(r"[a-z_0-9-]+", key):
+            continue
+        revision = str(info.get("rev", ""))
+        if re.fullmatch(r"[0-9]+", revision):
+            return key, revision
+    return None
+
+
 def image_fields(product, kind, language):
-    """OFF exports contain image metadata; construct missing selected-image URLs."""
+    """Construct original image-server URLs without changing stored metadata."""
     images = product.get("images") or {}
     if not isinstance(images, dict):
         return
     code = str(product.get("code", ""))
-    if not code.isdigit():
+    if not re.fullmatch(r"[0-9]+", code):
         return
     if len(code) > 8:
         path = "/".join((code[:3], code[3:6], code[6:9], code[9:]))
     else:
         path = code
     root = f"https://images.{PROJECTS[kind]}.org/images/products/{path}"
+    languages = (language, product.get("lc"), product.get("lang"))
     for role in ("front", "ingredients", "nutrition", "packaging"):
-        keys = [f"{role}_{language}", f"{role}_{product.get('lc', '')}", role]
-        key = next((key for key in keys if isinstance(images.get(key), dict)), None)
-        if key is None:
+        selected = _selected_image(images, role, languages)
+        if selected is None:
             continue
-        info = images[key]
-        rev = str(info.get("rev", ""))
-        if not rev.isdigit() or not re.fullmatch(r"[a-z_0-9-]+", key):
-            continue
+        key, revision = selected
         for suffix, size in (("thumb", "100"), ("small", "200"), ("", "400")):
             field = f"image_{role}_{suffix}_url" if suffix else f"image_{role}_url"
-            product.setdefault(field, f"{root}/{key}.{rev}.{size}.jpg")
+            if not product.get(field):
+                product[field] = f"{root}/{key}.{revision}.{size}.jpg"
     for suffix in ("thumb_url", "small_url", "url"):
-        if f"image_front_{suffix}" in product:
-            product.setdefault(f"image_{suffix}", product[f"image_front_{suffix}"])
+        if product.get(f"image_front_{suffix}") and not product.get(f"image_{suffix}"):
+            product[f"image_{suffix}"] = product[f"image_front_{suffix}"]
 
 
 def lookup(db, code, kind, language, fields=None):

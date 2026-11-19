@@ -147,7 +147,7 @@
     componentsReinstallText: "Python-/Linux-Basis, Gunicorn 27.x und MongoDB 8.0.x mit den derzeit verfügbaren passenden Komponenten erneut aufbauen. Die Dienste werden kurz neu gestartet. Daten, Einstellungen und Schlüssel bleiben erhalten. Es wird kein Vollimport angefordert.",
     components_already_current: "Alle Komponenten sind aktuell. Es ist kein Update nötig.",
     componentsConfirmText: "Python-/Linux-Basis, Gunicorn 27.x und MongoDB 8.0.x erneuern. Die Dienste werden kurz neu gestartet. Daten, Einstellungen und Schlüssel bleiben erhalten. Es wird kein Vollimport angefordert.",
-    componentsScope: "Debian und Docker auf dem Host, ein eigener Reverse Proxy und unser Programmcode werden dabei nicht aktualisiert.",
+    componentsScope: "Debian und Docker auf dem Host, ein eigener Reverse Proxy und der Programmcode werden dabei nicht aktualisiert.",
     component_agent_unavailable: "Der Host-Dienst ist nicht erreichbar. Im Server-Terminal ausführen: off-proxy host-agent install",
     component_import_active: "Ein Import läuft. Bitte sein Ende abwarten und das Update erneut starten.",
     componentPython: "Python- & Linux-Basis", componentGunicorn: "Gunicorn-Webserver", componentMongo: "MongoDB",

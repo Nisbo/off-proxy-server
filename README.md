@@ -118,7 +118,7 @@ This rebuilds the **currently installed source**, even if its commit has not cha
 It pulls the latest published Python 3.13 container base (including its Linux
 packages), installs the latest compatible Gunicorn **27.x**, and refreshes MongoDB
 within **8.0.x**. PyMongo stays pinned to the version tested with the application.
-It does not update the host's Debian, Docker, your reverse proxy, or our application
+It does not update the host's Debian, Docker, your reverse proxy, or application
 code. A new Python/MongoDB/Gunicorn version series requires an application update.
 There are **no automatic component updates** and no scheduled update job.
 

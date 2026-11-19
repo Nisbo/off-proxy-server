@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.14
+
+- EN: Resolve image URLs from both legacy and nested product-export metadata.
+  When the requested language has no selected image, use an available image
+  in another language, including the Spanish-only Snickers front image.
+- EN: Preserve original image-server URLs and stored product metadata.
+  The fix works with existing data; no full import is needed.
+- DE: Bildadressen aus alter und verschachtelter Exportstruktur aufbereiten.
+  Fehlt ein ausgewähltes Bild in der gewünschten Sprache, wird ein vorhandenes
+  Bild einer anderen Sprache verwendet, etwa das spanische Snickers-Frontbild.
+- DE: Ursprüngliche Bildserver-Adressen und gespeicherte Produktmetadaten
+  bleiben erhalten. Kein Vollimport für diese Korrektur erforderlich.
+
 ## 0.1.13
 
 - EN: Disable normal component updates when all three components are current;
