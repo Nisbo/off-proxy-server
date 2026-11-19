@@ -709,22 +709,19 @@ def test_full_import_keeps_old_products_readable_while_new_copy_is_written(db):
     assert old not in db.list_collection_names()
 
 
-@pytest.mark.parametrize('unreadable_pointer', [False, True])
-def test_lost_publish_acknowledgement_never_deletes_the_active_snapshot(db, unreadable_pointer):
+@pytest.mark.parametrize('committed', [False, True])
+def test_lost_publish_acknowledgement_never_deletes_either_possible_snapshot(db, committed):
     from pymongo.errors import AutoReconnect
     publish(db)
     real_state = db.state
     class State:
-        uncertain = False
         def update_one(self, query, update, **kwargs):
-            result = real_state.update_one(query, update, **kwargs)
             if 'collection' in update.get('$set', {}):
-                self.uncertain = True
-                raise AutoReconnect('acknowledgement lost after commit')
-            return result
+                if committed:
+                    real_state.update_one(query, update, **kwargs)
+                raise AutoReconnect('acknowledgement lost; commit outcome unknown')
+            return real_state.update_one(query, update, **kwargs)
         def find_one(self, query):
-            if self.uncertain and unreadable_pointer:
-                raise AutoReconnect('pointer temporarily unreadable')
             return real_state.find_one(query)
     class Database:
         state = State()
@@ -734,9 +731,10 @@ def test_lost_publish_acknowledgement_never_deletes_the_active_snapshot(db, unre
             return db[name]
     with patch.object(app, 'open_url', return_value=response(compressed(product(version=20)))), pytest.raises(AutoReconnect):
         app.full_import(Database(), 'food')
+    assert len([n for n in db.list_collection_names() if n.startswith('food_')]) == 2
     state = real_state.find_one({'_id':'food'})
     assert state['collection'] in db.list_collection_names()
-    assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == 20
+    assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == (20 if committed else 10)
 
 
 def test_retirement_failure_does_not_turn_successful_full_import_into_failure(db):

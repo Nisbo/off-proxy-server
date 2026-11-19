@@ -190,7 +190,7 @@ def full_import(db, kind):
         "progress": {"mode": "full", "records": 0, "unindexed": 0,
                      "started_epoch": started, "updated_epoch": started,
                      "downloaded_bytes": 0, "total_bytes": None, "finished": False}}}, upsert=True)
-    published = False
+    published = publication_attempted = False
     try:
         with open_url(export_url(kind)) as response:
             modified = response.headers.get("Last-Modified")
@@ -203,6 +203,7 @@ def full_import(db, kind):
         if previous_count and count < previous_count * 0.75:
             raise ValueError("Snapshot shrank by over 25%; manual review required")
         cursor = min(started, source_time) - 86400
+        publication_attempted = True
         db.state.update_one({"_id": kind}, {"$set": {
             "collection": stage, "ready": True, "records": count,
             "unindexed_records": unindexed,
@@ -219,14 +220,15 @@ def full_import(db, kind):
         LOG.info("%s: published %s products", kind, count)
     finally:
         if not published:
-            # A lost acknowledgement can mean publication succeeded despite an exception.
-            # Never remove a generation unless its unpublished state can be established.
-            try:
-                current = db.state.find_one({"_id": kind}) or {}
-                if current.get("collection") != stage:
+            # An acknowledgement failure cannot prove that publication did not commit.
+            # Retain that candidate, even if a subsequent read still shows the old pointer.
+            if publication_attempted:
+                LOG.warning("%s: publication result uncertain; candidate snapshot retained", kind)
+            else:
+                try:
                     db.drop_collection(stage)
-            except PyMongoError:
-                LOG.warning("%s: cleanup deferred until the published pointer can be verified", kind)
+                except PyMongoError:
+                    LOG.warning("%s: unpublished snapshot cleanup deferred", kind)
 
 
 def parse_deltas(text, project):
