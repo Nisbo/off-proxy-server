@@ -1,6 +1,6 @@
 name: off-proxy-server
 x-app: &app
-  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.9}
+  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.10}
   build:
     context: ${OFF_PROXY_SOURCE_DIR:-.}
   restart: unless-stopped
@@ -23,7 +23,7 @@ x-app: &app
     options: {max-size: 5m, max-file: '2'}
 services:
   mongo:
-    image: mongo:8.0
+    image: ${OFF_PROXY_MONGO_IMAGE:-mongo:8.0}
     restart: unless-stopped
     command: [mongod, --wiredTigerCacheSizeGB, '0.3', --bind_ip_all]
     volumes: [./data:/data/db, ./configdb:/data/configdb]

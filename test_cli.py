@@ -40,7 +40,14 @@ else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(os.environ['FAKE_R
 import json,os,pathlib,sys
 a=sys.argv[1:]
 with open(os.environ['FAKE_LOG'],'a') as f:f.write(json.dumps(a)+'\\n')
+with open(os.environ['FAKE_LOG']+'.images','a') as f:f.write(json.dumps([a,os.environ.get('OFF_PROXY_IMAGE_TAG'),os.environ.get('OFF_PROXY_MONGO_IMAGE')])+'\\n')
 if a[:2]==['compose','version'] or a[:1]==['ps']:sys.exit(0)
+if a[:1]==['inspect']:
+    print('sha256:'+'a'*64);sys.exit(0)
+if a[:2]==['image','inspect']:
+    print('mongo@sha256:'+'b'*64 if 'RepoDigests' in a[3] else 'sha256:'+'a'*64)
+    sys.exit(0)
+if a[:1]==['pull']:sys.exit(1 if os.environ.get('FAKE_PULL_FAIL')=='1' else 0)
 if '-f' not in a:sys.exit(9)
 source=a[a.index('-f')+1]
 if 'ps' in a:
@@ -49,7 +56,7 @@ if 'ps' in a:
 if 'exec' in a and any('result=db.scheduler.update_one' in x for x in a) and os.environ.get('FAKE_MAINTENANCE_BUSY')=='1':sys.exit(75)
 if 'exec' in a and any('busy=' in x for x in a):sys.exit(75 if os.environ.get('FAKE_BUSY')=='1' else 0)
 if 'exec' in a and any('sys.argv[1]' in x for x in a):
-    sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source else 0)
+    sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source or (os.environ.get('FAKE_COMPONENT_FAIL')=='1' and 'components-' in os.environ.get('OFF_PROXY_IMAGE_TAG','')) else 0)
 if 'build' in a and os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
 if a[-2:]==['app.py','password']:
     data=sys.stdin.readline()
@@ -341,3 +348,67 @@ def test_stopped_stack_can_be_updated_without_a_running_api(installation):
     assert run('update', FAKE_RELEASE='b'*40, FAKE_RUNNING='0').returncode == 0
     assert (root/'.state/current').read_text().strip() == 'b'*40
     assert not any(any('result=db.scheduler.update_one' in x for x in call) for call in docker_calls(log))
+
+
+def test_components_update_rebuilds_current_source_only_and_pins_images(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    config = (root/'.env').read_bytes()
+    downloads = Path(str(log)+'.downloads').read_bytes()
+    log.write_text('')
+    result = run('components-update')
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (root/'.state/current').read_text().strip() == 'a'*40
+    tag = (root/'.state'/('image-'+'a'*40)).read_text().strip()
+    assert tag.startswith('a'*40+'-components-')
+    assert (root/'.state/mongo-image').read_text().strip() == 'mongo@sha256:'+'b'*64
+    assert (root/'.env').read_bytes() == config
+    assert Path(str(log)+'.downloads').read_bytes() == downloads
+    calls = docker_calls(log)
+    build = next(i for i,c in enumerate(calls) if 'build' in c)
+    stop = next(i for i,c in enumerate(calls) if 'stop' in c)
+    assert '--pull' in calls[build] and '--no-cache' in calls[build]
+    assert build < stop
+    assert ['pull','mongo:8.0'] in calls
+    assert not any('down' in c or '--volumes' in c for c in calls)
+    log.write_text('')
+    assert run('start').returncode == 0
+    images = [json.loads(line) for line in Path(str(log)+'.images').read_text().splitlines()]
+    assert images[-1][1:] == [tag, 'mongo@sha256:'+'b'*64]
+    # Ordinary same-commit updates keep the refreshed images.
+    assert run('update').returncode == 0
+    assert (root/'.state'/('image-'+'a'*40)).read_text().strip() == tag
+
+
+@pytest.mark.parametrize('failure', ['FAKE_PULL_FAIL','FAKE_BUILD_FAIL','FAKE_MAINTENANCE_BUSY','FAKE_BUSY'])
+def test_component_preparation_failure_never_stops_services(installation, failure):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    config = (root/'.env').read_bytes()
+    log.write_text('')
+    assert run('components-update', **{failure:'1'}).returncode != 0
+    assert not any('stop' in c or 'up' in c for c in docker_calls(log))
+    assert not (root/'.state'/('image-'+'a'*40)).exists()
+    assert (root/'.env').read_bytes() == config
+
+
+def test_failed_components_activation_restores_exact_previous_images(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    log.write_text('')
+    result = run('components-update', FAKE_COMPONENT_FAIL='1')
+    assert result.returncode != 0
+    assert 'restoring previous images' in result.stderr
+    images = [json.loads(line) for line in Path(str(log)+'.images').read_text().splitlines()]
+    up = [row for row in images if 'up' in row[0]]
+    assert 'components-' in up[-2][1]
+    assert up[-1][1:] == ['a'*40, 'sha256:'+'a'*64]
+    assert not (root/'.state'/('image-'+'a'*40)).exists()
+    assert (root/'.state/mongo-image').read_text().strip() == 'sha256:'+'a'*64
+
+
+def test_components_update_can_start_a_stopped_stack(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    assert run('components-update', FAKE_RUNNING='0').returncode == 0
+    assert (root/'.state'/('image-'+'a'*40)).exists()

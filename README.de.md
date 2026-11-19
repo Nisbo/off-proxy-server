@@ -74,6 +74,7 @@ ist, läuft der Hintergrunddienst unabhängig von Shell und Browser weiter.
 | `off-proxy test 4062139025398 all` | Produkt in allen verfügbaren Beständen abfragen |
 | `off-proxy password` | GUI-Passwort setzen/zurücksetzen und alle Sitzungen abmelden |
 | `off-proxy update` | Aktuellen Commit von `main` herunterladen und aktivieren |
+| `off-proxy components-update` | Container-Komponenten manuell erneuern; Programmcode beibehalten |
 | `off-proxy rollback` | Zur vorherigen lokal gespeicherten Software zurückkehren |
 | `off-proxy stop` / `off-proxy start` | Diese Installation stoppen/starten; Daten behalten |
 | `off-proxy down` | Nur eigene Container/Netzwerke entfernen; Daten behalten |
@@ -93,6 +94,43 @@ sie nicht. Daten, Passwörter, API-Schlüssel, Bindings und Einstellungen bleibe
 **Rollback stellt Software zurück, keine Datenbanksicherung.** Eine Rückkehr auf
 Versionen vor 0.1.7 entfernt außerdem den GUI-Schutz und nutzt wieder den ursprünglichen
 API-Schlüssel aus `.env`.
+
+### Komponenten manuell aktualisieren
+
+Diese Version zuerst mit `off-proxy update` installieren, danach:
+
+```sh
+off-proxy components-update
+```
+
+Der Befehl baut den **bereits installierten Programmstand** erneut, auch bei
+gleichem Commit. Er lädt die neueste veröffentlichte Python-3.13-Containerbasis
+samt Linux-Paketen, installiert die neueste passende Waitress-Version aus
+**3.0.x** und erneuert MongoDB innerhalb von **8.0.x**. PyMongo bleibt auf der mit
+unserem Programm getesteten Version. Debian und Docker auf dem Host, ein eigener
+Reverse Proxy und unser Programmcode werden damit nicht aktualisiert. Neue
+Versionsreihen von Python, MongoDB oder Waitress benötigen ein Programmupdate.
+Es gibt **keine automatischen Komponenten-Updates** und keinen Update-Zeitplan.
+
+Download und Build werden vor dem Stoppen abgeschlossen. Ein laufender Import
+oder ein gerade gestarteter Abgleich stellt den Vorgang ohne Neustart zurück.
+Nach einem kurzen Neustart muss die API-Prüfung mit dem aktuellen Schlüssel
+bestehen. Eigene Image-Kennungen und ein festgehaltenes MongoDB-Image erhalten die
+bisherigen Images für einen Wiederherstellungsversuch bei fehlgeschlagenem Start.
+Datenbankdateien, Einstellungen, Passwort-Hashes, Sitzungen, API-Schlüssel,
+Bindings und Programmstand bleiben erhalten. Es wird kein Vollimport angefordert.
+Ein Software-Rollback macht ein erfolgreiches Komponenten-Update nicht rückgängig
+und stellt keine Datenbankdateien zurück: vorher eine Datenbanksicherung erstellen.
+Nach einer Unterbrechung den Befehl erneut ausführen; `.state` und Datenverzeichnisse
+nicht löschen.
+
+API und GUI verwenden jetzt **Waitress**, einen für den Produktivbetrieb ausgelegten
+WSGI-Webserver, statt Pythons Entwicklungsserver. Anfragen und Verbindungen sind
+begrenzt; der Container läuft weiterhin ohne Rootrechte. HTTPS übernimmt weiterhin
+der Reverse Proxy. `X-Forwarded-Proto: https` dient ausschließlich wie bisher als
+Hinweis für Secure-Cookies. Weitergeleitete Client-Adressen und Hosts werden nicht
+für Identität oder Zugriffskontrollen übernommen. Der Proxy muss `Host` erhalten
+und den Protokoll-Header selbst setzen.
 
 ## Oberfläche und Zugriff
 

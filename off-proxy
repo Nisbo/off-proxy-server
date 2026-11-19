@@ -50,11 +50,23 @@ version_for() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'Invalid source VERSION.'
   printf '%s' "$version"
 }
-compose_at() {
-  local source=$1; shift
-  OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$(basename "$source") \
+compose_images() {
+  local source=$1 image_tag=$2 mongo_image=$3; shift 3
+  OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
       -p "$PROJECT" -f "$source/compose.yaml" "$@"
+}
+image_tag_for() {
+  local release
+  release=$(basename "$1")
+  if [[ -f $ROOT/.state/image-$release ]]; then cat "$ROOT/.state/image-$release"; else printf '%s' "$release"; fi
+}
+mongo_image() {
+  if [[ -f $ROOT/.state/mongo-image ]]; then cat "$ROOT/.state/mongo-image"; else printf 'mongo:8.0'; fi
+}
+compose_at() {
+  local source=$1; shift
+  compose_images "$source" "$(image_tag_for "$source")" "$(mongo_image)" "$@"
 }
 compose_current() { compose_at "$(current_source)" "$@"; }
 
@@ -152,9 +164,11 @@ api_exec() {
 }
 
 wait_api() {
-  local source=$1 expected=$2 _attempt last_error=
+  local source=$1 expected=$2 image_tag=${3:-} mongo_ref=${4:-} _attempt last_error=
+  [[ -n $image_tag ]] || image_tag=$(image_tag_for "$source")
+  [[ -n $mongo_ref ]] || mongo_ref=$(mongo_image)
   for _attempt in {1..15}; do
-    if last_error=$(api_exec "$source" 'r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
+    if last_error=$(compose_images "$source" "$image_tag" "$mongo_ref" exec -T api python -c "$API_CLIENT_PY"$'\n''r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
 with urllib.request.urlopen(r,timeout=5) as response:
     sys.exit(0 if json.load(response)["version"]==sys.argv[1] else 1)' "$expected" 2>&1); then return 0; fi
     sleep 2
@@ -211,6 +225,45 @@ activate() {
   write_pointer current "$next"
   install_command "$source"
   printf 'OFF Proxy Server %s ready. Delta checks run in the background; confirm full imports in the dashboard.\n' "$expected"
+}
+
+components_update() {
+  local source release old_tag old_mongo mongo_container next_tag next_mongo result=0
+  source=$(current_source); release=$(basename "$source")
+  [[ $release != legacy && -f $source/security.py ]] || die 'Run off-proxy update first.'
+  check_import_idle "$source"
+  old_tag=$(image_tag_for "$source")
+  # Pin the actual local database image before pulling its moving 8.0 tag.
+  mongo_container=$(compose_at "$source" ps --all -q mongo)
+  if [[ -n $mongo_container ]]; then
+    old_mongo=$(docker inspect --format '{{.Image}}' "$mongo_container")
+  else
+    old_mongo=$(docker image inspect --format '{{.Id}}' "$(mongo_image)")
+  fi
+  [[ $old_mongo =~ ^sha256:[a-f0-9]{64}$ ]] || die 'Cannot identify existing MongoDB image; nothing restarted.'
+  write_pointer mongo-image "$old_mongo"
+  next_tag="$release-components-$(date +%s)-$RANDOM"
+  printf 'Updating components only / Nur Komponenten aktualisieren: Python/Linux, Waitress 3.0.x, MongoDB 8.0.x.\n'
+  printf 'Application code and pinned libraries stay unchanged; services restart briefly. No automatic updates.\n'
+  printf 'Programmcode und festgelegte Bibliotheken bleiben unverändert; kurzer Neustart. Keine automatischen Updates.\n'
+  # Both downloads/builds finish before any service is stopped. Old app tags stay intact.
+  docker pull mongo:8.0
+  next_mongo=$(docker image inspect --format '{{index .RepoDigests 0}}' mongo:8.0)
+  [[ $next_mongo =~ ^mongo@sha256:[a-f0-9]{64}$ ]] || die 'Cannot pin downloaded MongoDB image; nothing restarted.'
+  compose_images "$source" "$next_tag" "$next_mongo" build --pull --no-cache api
+  acquire_maintenance "$source"
+  compose_at "$source" stop sync
+  compose_images "$source" "$next_tag" "$next_mongo" up -d --no-build --pull never || result=$?
+  if [[ $result != 0 ]] || ! wait_api "$source" "$(version_for "$source")" "$next_tag" "$next_mongo"; then
+    printf 'Component activation failed; restoring previous images / Bisherige Images werden wiederhergestellt.\n' >&2
+    compose_images "$source" "$next_tag" "$next_mongo" stop sync || true
+    compose_images "$source" "$old_tag" "$old_mongo" up -d --no-build --pull never || true
+    die 'Component update failed. Data and credentials retained; inspect Docker logs.'
+  fi
+  write_pointer "image-$release" "$next_tag"
+  write_pointer mongo-image "$next_mongo"
+  release_maintenance
+  printf 'Components updated / Komponenten aktualisiert. Application version / Programmversion: %s\n' "$(version_for "$source")"
 }
 
 prepare_install() {
@@ -302,7 +355,7 @@ password_setup() {
 main() {
   local action=${1:-help} old next
   if [[ $action == help || $action == --help ]]; then
-    printf 'off-proxy install|update|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
+    printf 'off-proxy install|update|components-update|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
     return
   fi
   require_root; prerequisites
@@ -324,6 +377,7 @@ main() {
       fetch_release
       if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
       activate "$RELEASE" "$old"; password_setup ;;
+    components-update) lock_operation; components_update ;;
     rollback)
       lock_operation; old=$(cat "$ROOT/.state/current")
       [[ -f $ROOT/.state/previous ]] || die 'No previous release saved.'

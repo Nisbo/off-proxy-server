@@ -2,6 +2,8 @@
 import copy
 import datetime as dt
 import email.utils
+from email.message import Message
+from http import HTTPStatus
 import gzip
 import hashlib
 import hmac
@@ -19,7 +21,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from waitress.server import create_server
+from waitress import wasyncore
 
 from bson import json_util
 from pymongo import MongoClient
@@ -28,7 +31,7 @@ from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
 import security
 
-VERSION = "0.1.9"
+VERSION = "0.1.10"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -475,56 +478,92 @@ def lookup(db, code, kind, language, fields=None):
                              "message": {"id": "product_not_found", "name": "", "lc_name": ""}}]}
 
 
-class Server(ThreadingHTTPServer):
-    daemon_threads = True
-    request_queue_size = 16
+class Server:
+    """Application state and a bounded production WSGI server."""
 
     def __init__(self, address, db, token):
-        super().__init__(address, Handler)
         self.db = db
         self.security = security.Security(db, token)
         self.dashboard = Dashboard(db, VERSION, PROJECTS)
         self.control_nonce = secrets.token_urlsafe(32)
-        self.slots = threading.BoundedSemaphore(8)
+        self._stop = threading.Event()
+        self._closed = threading.Event()
+        self._map = {}
+        self.http = create_server(
+            self.application, host=address[0], port=address[1], map=self._map,
+            threads=8, connection_limit=32, backlog=16, channel_timeout=15,
+            cleanup_interval=5, max_request_header_size=16384,
+            max_request_body_size=4096, expose_tracebacks=False,
+            # Preserve only the existing HTTPS cookie hint. Never use forwarded
+            # addresses/hosts for access checks or client identity.
+            clear_untrusted_proxy_headers=False, ident="OFF Proxy Server",
+        )
+        self.server_port = self.http.effective_port
 
-    def process_request(self, request, client_address):
-        if not self.slots.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
+    def application(self, environ, start_response):
+        request = Request(self, environ)
         try:
-            super().process_request(request, client_address)
-        except BaseException:
-            self.slots.release()
-            raise
+            if request.command in ("GET", "HEAD"):
+                request.do_GET()
+            elif request.command == "POST":
+                request.do_POST()
+            else:
+                request.send_json(405, {"error": "method_not_allowed"})
+        except Exception:
+            LOG.exception("Unhandled application error")
+            request.send_json(500, {"error": "internal_error"})
+        # Never log query strings: they may contain accidentally pasted keys.
+        LOG.info("%s %r", request.command, environ.get("PATH_INFO", ""))
+        start_response(f"{request.status} {HTTPStatus(request.status).phrase}", request.response_headers)
+        return [b"" if request.command == "HEAD" else request.body]
 
-    def process_request_thread(self, request, client_address):
+    def serve_forever(self):
         try:
-            super().process_request_thread(request, client_address)
+            while not self._stop.is_set():
+                wasyncore.loop(timeout=0.1, count=1, map=self._map)
         finally:
-            self.slots.release()
+            self.http.task_dispatcher.shutdown(timeout=10)
+            wasyncore.close_all(map=self._map)
+            self._closed.set()
+
+    def shutdown(self):
+        self._stop.set()
+        self._closed.wait(15)
+
+    def server_close(self):
+        self.http.close()
 
 
-class Handler(BaseHTTPRequestHandler):
-    def setup(self):
-        super().setup()
-        self.connection.settimeout(15)
+class Request:
+    """Routes consume WSGI requests; Waitress owns HTTP parsing and sockets."""
+
+    def __init__(self, server, environ):
+        self.server = server
+        self.command = environ["REQUEST_METHOD"]
+        self.path = environ.get("PATH_INFO", "") + ("?" + environ["QUERY_STRING"] if environ.get("QUERY_STRING") else "")
+        self.client_address = (environ.get("REMOTE_ADDR", ""), 0)
+        self.headers = Message()
+        for name, value in environ.items():
+            if name.startswith("HTTP_"):
+                self.headers[name[5:].replace("_", "-")] = value
+        self.headers["Content-Length"] = environ.get("CONTENT_LENGTH", "0")
+        self.headers["Content-Type"] = environ.get("CONTENT_TYPE", "")
+        self.rfile = environ["wsgi.input"]
 
     def send_body(self, status, body, content_type, cookie=None):
-        self.send_response(status)
+        self.status, self.body = status, body
+        self.response_headers = [
+            ("Content-Type", content_type), ("Content-Length", str(len(body))),
+            ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"),
+            ("Referrer-Policy", "no-referrer"),
+            ("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; "
+             "connect-src 'self'; img-src 'self' data: https://images.openfoodfacts.org "
+             "https://images.openbeautyfacts.org https://images.openpetfoodfacts.org "
+             "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"),
+            ("X-Data-Attribution", "Open Food Facts contributors; ODbL-1.0"),
+        ]
         if cookie is not None:
-            self.send_header("Set-Cookie", cookie)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; "
-                         "connect-src 'self'; img-src 'self' data: https://images.openfoodfacts.org "
-                         "https://images.openbeautyfacts.org https://images.openpetfoodfacts.org "
-                         "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-        self.send_header("X-Data-Attribution", "Open Food Facts contributors; ODbL-1.0")
-        self.end_headers()
-        self.wfile.write(body)
+            self.response_headers.append(("Set-Cookie", cookie))
 
     def send_json(self, status, payload, cookie=None):
         self.send_body(status, json_util.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -699,10 +738,6 @@ class Handler(BaseHTTPRequestHandler):
             LOG.exception("Dashboard control failed")
             self.send_json(503, {"error": "database_unavailable"})
 
-    def log_message(self, fmt, *args):
-        # Query strings may contain accidentally pasted credentials; never log them.
-        LOG.info("%s %r", getattr(self, "command", "HTTP"), self.path.split("?", 1)[0])
-
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -729,7 +764,10 @@ def main():
     token = os.environ.get("API_TOKEN", "")
     if len(token) < 24:
         raise SystemExit("API_TOKEN must contain at least 24 characters")
-    Server(("0.0.0.0", 8080), db, token).serve_forever()  # nosec B104 # Container listener; host binding is controlled by BIND_IP.
+    server = Server(("0.0.0.0", 8080), db, token)  # nosec B104 # Host binding is controlled by BIND_IP.
+    signal.signal(signal.SIGTERM, lambda *_: server._stop.set())
+    signal.signal(signal.SIGINT, lambda *_: server._stop.set())
+    server.serve_forever()
 
 
 if __name__ == "__main__":

@@ -55,7 +55,9 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         commit = (root/'.state/current').read_text().strip() if (root/'.state/current').exists() else 'a'*40
         return subprocess.run(['docker','compose','--project-directory',str(root),'--env-file',str(root/'.env'),
             '-p','off-proxy-server','-f',str(root/'releases'/commit/'compose.yaml'),*args],
-            env=dict(env, OFF_PROXY_SOURCE_DIR=str(root/'releases'/commit), OFF_PROXY_IMAGE_TAG=commit),
+            env=dict(env, OFF_PROXY_SOURCE_DIR=str(root/'releases'/commit),
+                     OFF_PROXY_IMAGE_TAG=(root/'.state'/('image-'+commit)).read_text().strip() if (root/'.state'/('image-'+commit)).exists() else commit,
+                     OFF_PROXY_MONGO_IMAGE=(root/'.state/mongo-image').read_text().strip() if (root/'.state/mongo-image').exists() else 'mongo:8.0'),
             input=data, text=True, capture_output=True, check=True, timeout=120)
     def wait_idle(client):
         for _ in range(75):
@@ -83,6 +85,15 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         assert client.call('/health', key=rotated)[1]['version'] == newer
         assert client.call('/health', key=token)[0] == 401
         assert client.call('/ui/status')[0] == 200  # Session survived replacement.
+        wait_idle(client)
+        source_before = (root/'.state/current').read_text()
+        manage('components-update',commit='b'*40)
+        assert (root/'.state/current').read_text() == source_before
+        assert (root/'.env').read_bytes() == initial_env
+        assert (root/'.state'/('image-'+'b'*40)).read_text().strip().startswith('b'*40+'-components-')
+        assert client.call('/health', key=rotated)[1]['version'] == newer
+        assert client.call('/health', key=token)[0] == 401
+        assert client.call('/ui/status')[0] == 200
         wait_idle(client); manage('rollback')
         assert client.call('/health', key=rotated)[1]['version'] == version
         assert client.call('/ui/status')[0] == 200

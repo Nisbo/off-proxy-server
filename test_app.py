@@ -803,16 +803,54 @@ def test_oversized_barcode_is_rejected_before_database_lookup(http):
     assert get(http+'/api/v3/product/'+('1'*257)+'.json')[0] == 400
 
 
-def test_invalid_absolute_request_target_returns_400(http):
+def test_invalid_absolute_request_target_is_rejected_before_routing(http):
     import socket
     from urllib.parse import urlsplit
     address = urlsplit(http)
     with socket.create_connection((address.hostname, address.port), timeout=5) as connection:
         connection.sendall(b'GET http://[ HTTP/1.0\r\nHost: localhost\r\n\r\n')
-        assert b' 400 ' in connection.recv(256).split(b'\r\n', 1)[0]
+        response = connection.recv(256)
+        # Waitress rejects malformed absolute URIs by closing the connection.
+        assert not response or b' 400 ' in response.split(b'\r\n', 1)[0]
+    assert get(http+'/health')[0] == 200
 
 
 def test_query_string_credentials_are_not_written_to_request_logs(http):
     with patch.object(app.LOG, 'info') as info:
         assert get(http+'/health?accidental_key=do-not-log-this-secret')[0] == 200
     assert 'do-not-log-this-secret' not in repr(info.call_args_list)
+
+
+def test_wsgi_head_returns_headers_without_a_body(http):
+    request = urllib.request.Request(http+'/', method='HEAD')
+    with urllib.request.urlopen(request, timeout=5) as response:
+        assert response.status == 200
+        assert response.read() == b''
+        assert int(response.headers['Content-Length']) > 0
+        assert response.headers['X-Content-Type-Options'] == 'nosniff'
+
+
+def test_wsgi_unsupported_method_cannot_trigger_control(http):
+    request = urllib.request.Request(http+'/ui/sync', method='PUT', data=b'{}')
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=5)
+    assert caught.value.code == 405
+
+
+def test_waitress_rejects_large_bodies_before_application(http):
+    request = urllib.request.Request(http+'/auth/login', data=b'x'*4097,
+                                     headers={'Content-Type':'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=5)
+    assert caught.value.code == 413
+    assert get(http+'/health')[0] == 200
+
+
+def test_waitress_rejects_conflicting_content_lengths(http):
+    import socket
+    from urllib.parse import urlsplit
+    address = urlsplit(http)
+    with socket.create_connection((address.hostname, address.port), timeout=5) as connection:
+        connection.sendall(b'POST /auth/login HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nContent-Length: 3\r\nConnection: close\r\n\r\n{}x')
+        assert b' 400 ' in connection.recv(512).split(b'\r\n', 1)[0]
+    assert get(http+'/health')[0] == 200

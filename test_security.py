@@ -264,3 +264,12 @@ def test_seven_character_password_is_rejected_without_changing_existing_password
     with pytest.raises(ValueError, match='8–256'):
         server.security.set_password('seven77')
     assert client.login()[0] == 200
+
+
+def test_forwarded_client_identity_is_not_trusted(secured):
+    server, client = secured
+    client.csrf = client.call('/auth/status')[1]['control_nonce']
+    with patch.object(server.security, 'login', wraps=server.security.login) as login:
+        assert client.call('/auth/login', {'password':PASSWORD},
+                           headers={'X-Forwarded-For':'192.0.2.123','Forwarded':'for=192.0.2.123'})[0] == 200
+    assert login.call_args.args[1] == '127.0.0.1'

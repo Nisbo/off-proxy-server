@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.10
+
+- EN: Replace the development HTTP server with bounded Waitress WSGI serving;
+  retain API routes, GUI authentication, sessions, CSRF and API key behavior.
+- EN: Add manual `off-proxy components-update` for the installed source, refreshed
+  Python/Linux base, compatible Waitress patches and MongoDB 8.0 patches. Build
+  before downtime, defer during imports, pin images and recover previous images
+  on failed activation. No automatic updates; data and credentials are retained.
+- DE: Entwicklungs-Webserver durch Waitress mit begrenzten Verbindungen und
+  Anfragen ersetzt; API, GUI-Anmeldung, Sitzungen und Schlüssel bleiben erhalten.
+- DE: Manueller Befehl `off-proxy components-update` für Python-/Linux-Basis,
+  passende Waitress-Patches und MongoDB 8.0. Build vor dem Neustart, Zurückstellen
+  bei Importen und bisherige Images bei Startfehlern wiederherstellen. Keine
+  automatischen Updates; Daten und Zugangsdaten bleiben erhalten.
+
 ## 0.1.9
 
 - EN: Upgrade PyMongo to 4.18.3, enforce HTTPS source redirects and run the application

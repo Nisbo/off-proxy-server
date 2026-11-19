@@ -70,6 +70,7 @@ the background and does not depend on the shell or browser remaining open.
 | `off-proxy test 4062139025398 all` | Query a product across all available datasets |
 | `off-proxy password` | Set/reset the GUI password and revoke all sessions |
 | `off-proxy update` | Download and activate the current `main` commit |
+| `off-proxy components-update` | Manually refresh container components without changing application code |
 | `off-proxy rollback` | Return to the previous locally retained software version |
 | `off-proxy stop` / `off-proxy start` | Stop/start this installation; retain data |
 | `off-proxy down` | Remove only this project's containers/networks; retain data |
@@ -87,6 +88,39 @@ Existing data, passwords, API keys, bindings and settings are retained.
 
 **Rollback restores software, not a database backup.** Returning to versions before
 0.1.7 also removes GUI protection and uses the original `.env` API key again.
+
+### Manual component updates
+
+After installing this version with `off-proxy update`, run:
+
+```sh
+off-proxy components-update
+```
+
+This rebuilds the **currently installed source**, even if its commit has not changed.
+It pulls the latest published Python 3.13 container base (including its Linux
+packages), installs the latest compatible Waitress **3.0.x**, and refreshes MongoDB
+within **8.0.x**. PyMongo stays pinned to the version tested with the application.
+It does not update the host's Debian, Docker, your reverse proxy, or our application
+code. A new Python/MongoDB/Waitress version series requires an application update.
+There are **no automatic component updates** and no scheduled update job.
+
+Downloads and the replacement build finish before services stop. Active imports
+or a racing synchronization cycle defer the operation without stopping services.
+After a short restart, the authenticated API health check must succeed. Separate
+application image tags and a pinned MongoDB image preserve the previous images
+for a failed-activation recovery attempt. Database files, settings, password hashes,
+sessions, API keys, bindings and installed source pointers are retained. A component
+update does not request a full import. Software rollback does not undo a successful
+component update or restore database files: make a database backup beforehand.
+If interrupted, rerun the command; do not delete `.state` or database directories.
+
+The API and GUI now run on **Waitress**, a production WSGI server, instead of
+Python's development HTTP server. Requests and connections are bounded; the image
+still runs without root privileges. HTTPS remains the responsibility of your
+reverse proxy. `X-Forwarded-Proto: https` is retained solely as the existing Secure
+cookie hint; forwarded client addresses and hosts are not trusted for identity or
+access checks. The proxy must preserve `Host` and overwrite the protocol header.
 
 ## Dashboard and access
 
