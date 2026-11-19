@@ -76,7 +76,9 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         assert client.call('/ui/security', {'api_token':rotated})[0] == 200
         # Keep initial datasets unapproved, so the smoke test never fetches OFF data.
         compose('exec','-T','api','python','-c', 'from app import database,save_product; db=database(); save_product(db.food_smoke,{"code":"0123456789012","product_name":"Preserved smoke product"})')
-        manage('status'); wait_idle(client); manage('update',commit='b'*40)
+        manage('status'); wait_idle(client)
+        compose('stop','api')  # Update must recover even when the old API is unavailable.
+        manage('update',commit='b'*40)
         assert (root/'.env').read_bytes() == initial_env
         assert client.call('/health', key=rotated)[1]['version'] == newer
         assert client.call('/health', key=token)[0] == 401

@@ -332,3 +332,12 @@ def test_gate_is_acquired_before_stop_and_released_after_success_or_restore(inst
             assert run('rollback').returncode == 0
         else:
             assert result.returncode != 0
+
+
+def test_stopped_stack_can_be_updated_without_a_running_api(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    log.write_text('')
+    assert run('update', FAKE_RELEASE='b'*40, FAKE_RUNNING='0').returncode == 0
+    assert (root/'.state/current').read_text().strip() == 'b'*40
+    assert not any(any('result=db.scheduler.update_one' in x for x in call) for call in docker_calls(log))

@@ -63,7 +63,7 @@ check_import_idle() {
   running=$(compose_at "$source" ps --status running -q sync)
   [[ -n $running ]] || return 0
   # shellcheck disable=SC2016 # MongoDB operators must not be expanded by the shell.
-  compose_at "$source" exec -T api python -c '
+  compose_at "$source" exec -T sync python -c '
 import os, sys
 from pymongo import MongoClient
 db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
@@ -74,10 +74,12 @@ sys.exit(75 if busy else 0)' || result=$?
 }
 
 acquire_maintenance() {
-  local source=$1
+  local source=$1 running
+  running=$(compose_at "$source" ps --status running -q sync)
+  [[ -n $running ]] || return 0
   # This update gate and the worker's cycle claim share one atomic scheduler row.
   # shellcheck disable=SC2016 # MongoDB operators must not be expanded by the shell.
-  compose_at "$source" exec -T api python -c '
+  compose_at "$source" exec -T sync python -c '
 import os, sys, time
 from pymongo import MongoClient
 db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
@@ -91,7 +93,7 @@ if not result.matched_count: sys.exit(75)' || die 'Update deferred: synchronizat
 release_maintenance() {
   [[ -n $MAINTENANCE_SOURCE ]] || return 0
   # shellcheck disable=SC2016 # MongoDB operators must not be expanded by the shell.
-  compose_at "$MAINTENANCE_SOURCE" exec -T api python -c '
+  compose_at "$MAINTENANCE_SOURCE" exec -T sync python -c '
 import os
 from pymongo import MongoClient
 db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
