@@ -112,7 +112,11 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         deadline=time.monotonic()+300
         while time.monotonic() < deadline:
             try:
-                state=client.call('/ui/components')[1]
+                status,state,_=client.call('/ui/components')
+                if status == 503:
+                    time.sleep(1)
+                    continue  # The old API can report DB-unavailable during MongoDB replacement.
+                assert status == 200, (status,state)
                 if state['status'] not in ('pending','running'):
                     assert state['status']=='success', state
                     break
