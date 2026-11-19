@@ -21,8 +21,8 @@ class Denied(Exception):
 
 
 def password_hash(password):
-    if not isinstance(password, str) or not 12 <= len(password) <= 256:
-        raise ValueError('Password must contain 12–256 characters / Passwort muss 12–256 Zeichen enthalten')
+    if not isinstance(password, str) or not 8 <= len(password) <= 256:
+        raise ValueError('Password must contain 8–256 characters / Passwort muss 8–256 Zeichen enthalten')
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), ITERATIONS).hex()
     return f'pbkdf2-sha256${ITERATIONS}${salt}${digest}'

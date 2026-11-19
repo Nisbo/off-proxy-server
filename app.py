@@ -28,7 +28,7 @@ from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
 import security
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",

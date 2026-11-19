@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.7">
-  <script defer src="/assets/dashboard.js?v=0.1.7"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.8">
+  <script defer src="/assets/dashboard.js?v=0.1.8"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.7</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.8</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -92,8 +92,8 @@
         <section class="setting-group">
           <h3 data-i18n="changePassword"></h3>
           <label for="current-password" data-i18n="currentPassword"></label><input type="password" id="current-password" autocomplete="current-password" maxlength="256">
-          <label for="new-password" data-i18n="newPassword"></label><input type="password" id="new-password" autocomplete="new-password" minlength="12" maxlength="256">
-          <label for="repeat-password" data-i18n="repeatPassword"></label><input type="password" id="repeat-password" autocomplete="new-password" minlength="12" maxlength="256">
+          <label for="new-password" data-i18n="newPassword"></label><input type="password" id="new-password" autocomplete="new-password" minlength="8" maxlength="256">
+          <label for="repeat-password" data-i18n="repeatPassword"></label><input type="password" id="repeat-password" autocomplete="new-password" minlength="8" maxlength="256">
           <p class="muted" data-i18n="passwordHelp"></p><button type="button" id="password-save" class="secondary" data-i18n="changePassword"></button>
         </section>
         <p id="access-message" role="status" hidden></p>

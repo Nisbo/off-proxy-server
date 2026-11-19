@@ -247,3 +247,20 @@ def test_login_form_never_submits_password_in_url_if_javascript_fails(secured):
         parser = Forms()
         parser.feed(response.read().decode())
     assert parser.found
+
+
+def test_eight_character_password_can_be_set_and_changed_in_gui(secured):
+    server, client = secured
+    server.security.set_password('eight888')
+    assert client.login('eight888')[0] == 200
+    assert client.call('/auth/password', {'current_password':'eight888','new_password':'seven77'})[0] == 400
+    assert client.call('/auth/password', {'current_password':'eight888','new_password':'next8888'})[0] == 200
+    assert client.login('next8888')[0] == 200
+    assert server.security.api_key() == KEY
+
+
+def test_seven_character_password_is_rejected_without_changing_existing_password(secured):
+    server, client = secured
+    with pytest.raises(ValueError, match='8–256'):
+        server.security.set_password('seven77')
+    assert client.login()[0] == 200

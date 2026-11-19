@@ -118,7 +118,7 @@ off-proxy password
 ```
 
 The entry is hidden (including pasted text) and is passed on stdin, never as a
-command argument. Use 12–256 characters. Until setup is complete, existing API
+command argument. Use 8–256 characters. Until setup is complete, existing API
 clients and synchronization continue, but no dashboard data or controls are
 available without a session. There is no public GUI search in this version.
 

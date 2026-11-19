@@ -89,8 +89,8 @@
     publicApiConsent: "I allow product API requests without a key. Anyone who can reach this server can query products.",
     apiKey: "API key", keyHelp: "Leave unchanged to keep the current key. Use the eye to reveal it or copy it while hidden. A new key takes effect when saved.", copy: "Copy", copied: "Copied", generate: "Generate new key",
     keyChangeConsent: "Connected applications must use the new key after saving. The old key stops working immediately.",
-    changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", repeatPassword: "Repeat new password", passwordHelp: "Use 12–256 characters. All sessions will be signed out.",
-    passwordMismatch: "The new passwords do not match or contain fewer than 12 characters.", showSecret: "Show", hideSecret: "Hide", accessSaved: "Access settings saved.", storedKey: "Stored key", copyFailed: "Copy failed. Reveal the key and copy it manually."
+    changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", repeatPassword: "Repeat new password", passwordHelp: "Use 8–256 characters. All sessions will be signed out.",
+    passwordMismatch: "The new passwords do not match or contain fewer than 8 characters.", showSecret: "Show", hideSecret: "Hide", accessSaved: "Access settings saved.", storedKey: "Stored key", copyFailed: "Copy failed. Reveal the key and copy it manually."
   });
   Object.assign(labels.de, {
     protectedAccess: "GESCHÜTZTER ZUGRIFF", loginTitle: "Willkommen zurück", loginHelp: "Melde dich mit deinem Administrator-Passwort an.",
@@ -103,8 +103,8 @@
     publicApiConsent: "Ich erlaube Produktabfragen ohne Schlüssel. Jeder, der diesen Server erreicht, kann Produkte abfragen.",
     apiKey: "API-Schlüssel", keyHelp: "Unverändert lassen, um den bisherigen Schlüssel zu behalten. Mit dem Auge anzeigen oder verdeckt kopieren. Ein neuer Schlüssel gilt erst nach dem Speichern.", copy: "Kopieren", copied: "Kopiert", generate: "Neuen Schlüssel generieren",
     keyChangeConsent: "Angeschlossene Anwendungen benötigen nach dem Speichern den neuen Schlüssel. Der alte funktioniert dann sofort nicht mehr.",
-    changePassword: "Passwort ändern", currentPassword: "Aktuelles Passwort", newPassword: "Neues Passwort", repeatPassword: "Neues Passwort wiederholen", passwordHelp: "12–256 Zeichen verwenden. Alle Sitzungen werden abgemeldet.",
-    passwordMismatch: "Die neuen Passwörter stimmen nicht überein oder enthalten weniger als 12 Zeichen.", showSecret: "Anzeigen", hideSecret: "Verbergen", accessSaved: "Zugriffseinstellungen gespeichert.", storedKey: "Gespeicherter Schlüssel", copyFailed: "Kopieren fehlgeschlagen. Bitte Schlüssel einblenden und manuell kopieren."
+    changePassword: "Passwort ändern", currentPassword: "Aktuelles Passwort", newPassword: "Neues Passwort", repeatPassword: "Neues Passwort wiederholen", passwordHelp: "8–256 Zeichen verwenden. Alle Sitzungen werden abgemeldet.",
+    passwordMismatch: "Die neuen Passwörter stimmen nicht überein oder enthalten weniger als 8 Zeichen.", showSecret: "Anzeigen", hideSecret: "Verbergen", accessSaved: "Zugriffseinstellungen gespeichert.", storedKey: "Gespeicherter Schlüssel", copyFailed: "Kopieren fehlgeschlagen. Bitte Schlüssel einblenden und manuell kopieren."
   });
   const kinds = ["food", "beauty", "petfood", "product"];
   const $ = id => document.getElementById(id);
@@ -372,7 +372,7 @@
     catch (_) { accessMessage("controlError"); }
   });
   $("password-save").addEventListener("click", async () => {
-    if ($("new-password").value.length < 12 || $("new-password").value !== $("repeat-password").value) { accessMessage("passwordMismatch"); return; }
+    if ($("new-password").value.length < 8 || $("new-password").value !== $("repeat-password").value) { accessMessage("passwordMismatch"); return; }
     $("password-save").disabled = true;
     try { await authPost("/auth/password", {current_password:$("current-password").value, new_password:$("new-password").value}); lockGui("sessionExpired"); await checkAuth(); }
     catch (error) { if (error.message === "invalid_password") accessMessage("invalid_password"); else if (error.status === 401) lockGui("sessionExpired"); else accessMessage("controlError"); }

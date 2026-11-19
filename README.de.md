@@ -125,7 +125,7 @@ off-proxy password
 ```
 
 Die Eingabe bleibt verdeckt, auch beim Einfügen. Das Passwort wird nur über die
-Standardeingabe weitergegeben, niemals als Befehlsargument. 12–256 Zeichen verwenden.
+Standardeingabe weitergegeben, niemals als Befehlsargument. 8–256 Zeichen verwenden.
 Bis zur Einrichtung funktionieren vorhandene API-Clients und die Synchronisierung
 weiter; GUI-Daten und Steuerung sind gesperrt. Eine öffentliche GUI-Suche ist in
 dieser Version nicht enthalten.

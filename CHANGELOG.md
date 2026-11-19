@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8
+
+- EN: Lower the GUI password minimum to eight characters in backend validation,
+  terminal prompts, browser validation and both languages. Existing passwords remain valid.
+- DE: Mindestlänge des GUI-Passworts auf acht Zeichen reduzieren: Backend, Terminal,
+  Browser-Prüfung und beide Sprachen. Vorhandene Passwörter bleiben gültig.
+
 ## 0.1.7
 
 - EN: Protect GUI data and controls with administrator login, salted password hashes,

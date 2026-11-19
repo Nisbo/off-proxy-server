@@ -219,7 +219,7 @@ def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installati
     import time
     root, env, log, run = installation
     assert run('install').returncode == 0
-    password = 'a-secret-typed-in-terminal'
+    password = 'eight888'
     child, terminal = pty.fork()
     if child == 0:
         os.execve('/bin/bash', ['bash', str(SOURCE/'off-proxy'), 'password'], env)

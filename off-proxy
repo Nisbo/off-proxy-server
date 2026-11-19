@@ -226,7 +226,7 @@ password_command() (
   trap 'stty "$terminal_state" </dev/tty' EXIT
   trap 'exit 130' INT TERM
   stty -echo </dev/tty
-  printf 'New GUI password (12–256 characters) / Neues GUI-Passwort (12–256 Zeichen): ' >/dev/tty
+  printf 'New GUI password (8–256 characters) / Neues GUI-Passwort (8–256 Zeichen): ' >/dev/tty
   IFS= read -r -s first </dev/tty || die 'Password entry cancelled.'
   printf '\nRepeat password / Passwort wiederholen: ' >/dev/tty
   IFS= read -r -s second </dev/tty || die 'Password entry cancelled.'
