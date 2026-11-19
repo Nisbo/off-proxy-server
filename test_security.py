@@ -217,11 +217,13 @@ def test_invalid_security_settings_do_not_change_key(secured, values):
 
 def test_rate_limit_survives_service_object_restart(secured):
     server, client = secured
-    for _ in range(8):
-        assert client.login('wrong password')[0] == 401
-    assert client.login()[0] == 429
-    server.security = security.Security(server.db, KEY)
-    assert client.login()[0] == 429
+    # Keep all attempts in one fixed window, even when CI crosses a 5-minute boundary.
+    with patch.object(security.time, 'time', return_value=time.time()):
+        for _ in range(8):
+            assert client.login('wrong password')[0] == 401
+        assert client.login()[0] == 429
+        server.security = security.Security(server.db, KEY)
+        assert client.login()[0] == 429
 
 
 def test_password_is_salted_hash_and_never_plaintext(secured):
