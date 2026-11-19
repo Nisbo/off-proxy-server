@@ -89,12 +89,25 @@ fetch_release() {
   cleanup; TEMP=
 }
 
+# Shared client code keeps status, update checks and tests working after key rotation.
+API_CLIENT_PY='import json, os, sys, urllib.request, urllib.error
+import importlib.util
+from pymongo import MongoClient
+def current_key():
+    if importlib.util.find_spec("security") is None: return os.environ["API_TOKEN"]
+    from security import Security
+    db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
+    return Security(db,os.environ["API_TOKEN"]).api_key()
+'
+api_exec() {
+  local source=$1 code=$2; shift 2
+  compose_at "$source" exec -T api python -c "$API_CLIENT_PY"$'\n'"$code" "$@"
+}
+
 wait_api() {
   local source=$1 expected=$2 attempt
   for attempt in {1..15}; do
-    if compose_at "$source" exec -T api python -c '
-import json, os, sys, urllib.request
-r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+os.environ["API_TOKEN"]})
+    if api_exec "$source" 'r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
 with urllib.request.urlopen(r,timeout=5) as response:
     sys.exit(0 if json.load(response)["version"]==sys.argv[1] else 1)' "$expected" >/dev/null 2>&1; then return 0; fi
     sleep 2
@@ -190,9 +203,7 @@ prepare_install() {
 }
 
 status_command() {
-  compose_current exec -T api python -c '
-import json, os, urllib.request
-r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+os.environ["API_TOKEN"]})
+  api_exec "$(current_source)" 'r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
 with urllib.request.urlopen(r,timeout=10) as response:
     print(json.dumps(json.load(response),ensure_ascii=False,indent=2))'
 }
@@ -200,20 +211,46 @@ test_command() {
   local code=${1:-4062139025398} kind=${2:-all}
   [[ $code =~ ^[0-9]+$ ]] || die 'Numeric barcode required.'
   [[ $kind =~ ^(food|beauty|petfood|product|all)$ ]] || die 'Invalid product type.'
-  compose_current exec -T api python -c '
-import json, os, sys, urllib.request, urllib.error
-url="http://127.0.0.1:8080/api/v3/product/"+sys.argv[1]+".json?product_type="+sys.argv[2]+"&fields=code,product_name,product_name_de,product_name_en,brands,quantity,image_front_thumb_url,product_type"
-req=urllib.request.Request(url,headers={"Authorization":"Bearer "+os.environ["API_TOKEN"]})
+  api_exec "$(current_source)" 'url="http://127.0.0.1:8080/api/v3/product/"+sys.argv[1]+".json?product_type="+sys.argv[2]+"&fields=code,product_name,product_name_de,product_name_en,brands,quantity,image_front_thumb_url,product_type"
+req=urllib.request.Request(url,headers={"Authorization":"Bearer "+current_key()})
 try:
     with urllib.request.urlopen(req,timeout=10) as response: print(json.dumps(json.load(response),ensure_ascii=False,indent=2))
 except urllib.error.HTTPError as error:
     print(error.code,error.read().decode()); sys.exit(1)' "$code" "$kind"
 }
 
+password_command() (
+  local first second terminal_state
+  (: </dev/tty) 2>/dev/null || die 'A terminal is required / Bitte in einem Terminal ausführen.'
+  terminal_state=$(stty -g </dev/tty)
+  trap 'stty "$terminal_state" </dev/tty' EXIT
+  trap 'exit 130' INT TERM
+  stty -echo </dev/tty
+  printf 'New GUI password (12–256 characters) / Neues GUI-Passwort (12–256 Zeichen): ' >/dev/tty
+  IFS= read -r -s first </dev/tty || die 'Password entry cancelled.'
+  printf '\nRepeat password / Passwort wiederholen: ' >/dev/tty
+  IFS= read -r -s second </dev/tty || die 'Password entry cancelled.'
+  printf '\n' >/dev/tty
+  [[ $first == "$second" ]] || die 'Passwords do not match / Passwörter stimmen nicht überein.'
+  printf '%s\n' "$first" | compose_current exec -T api python app.py password
+  unset first second
+)
+password_setup() {
+  local configured
+  configured=$(compose_current exec -T api python app.py password-configured)
+  if [[ $configured == no ]]; then
+    if [[ ${1:-} == install ]] && (: </dev/tty) 2>/dev/null; then
+      password_command
+    else
+      printf 'GUI locked. Set your password with: off-proxy password / GUI gesperrt. Passwort festlegen: off-proxy password\n'
+    fi
+  fi
+}
+
 main() {
   local action=${1:-help} old next
   if [[ $action == help || $action == --help ]]; then
-    printf 'off-proxy install|update|rollback|start|stop|down|status|logs|test [EAN] [type]\n'
+    printf 'off-proxy install|update|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
     return
   fi
   require_root; prerequisites
@@ -222,8 +259,9 @@ main() {
     old=$(cat "$ROOT/.state/current" 2>/dev/null || true)
     [[ -z $old ]] || check_import_idle "$(source_for "$old")"
     fetch_release
-    if [[ $old == "$RELEASE" ]]; then install_command "$(source_for "$old")"; printf 'Already current.\n'; return; fi
+    if [[ $old == "$RELEASE" ]]; then install_command "$(source_for "$old")"; printf 'Already current.\n'; password_setup install; return; fi
     activate "$RELEASE" "$old"
+    password_setup install
     return
   fi
   load_state
@@ -233,7 +271,7 @@ main() {
       check_import_idle "$(source_for "$old")"
       fetch_release
       if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
-      activate "$RELEASE" "$old" ;;
+      activate "$RELEASE" "$old"; password_setup ;;
     rollback)
       lock_operation; old=$(cat "$ROOT/.state/current")
       [[ -f $ROOT/.state/previous ]] || die 'No previous release saved.'
@@ -242,6 +280,7 @@ main() {
     start) lock_operation; compose_current up -d --no-build ;;
     stop) lock_operation; compose_current stop ;;
     down) lock_operation; compose_current down ;;
+    password) lock_operation; password_command ;;
     status) status_command ;;
     logs) compose_current logs -f --tail 40 sync ;;
     test) test_command "${2:-4062139025398}" "${3:-all}" ;;

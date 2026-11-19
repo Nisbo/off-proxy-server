@@ -103,20 +103,57 @@ imports then run independently in the background. An interrupted unfinished full
 needs a new confirmation and restarts from the beginning; completed datasets remain published.
 On a fresh installation, open the dashboard and confirm the initial import for each dataset.
 
-## Test dashboard (no login yet)
+## Protected dashboard and API access
 
 Open `http://<BIND_IP>:8097/` after updating. A browser running directly on the
 server can use `http://127.0.0.1:8097/`. The dashboard supports English and German;
 the language selection is retained locally in the browser.
 
-**The dashboard is intentionally accessible without a login in this early test
-version. Anyone who can reach the port can view data, change synchronization
-settings and request imports.** Keep it on a trusted local/VPN network.
-The UI uses same-origin control requests with CSRF protection, not authentication.
-The existing `/health` and `/api/v3/product/...` routes still require the API key.
-No key is embedded in the web page, sent to the browser or required for GUI lookup.
-Product records cannot be edited through the GUI. Import controls ask the existing
-background worker to synchronize; they do not run a second importer.
+The dashboard is locked until you set an administrator password. Fresh interactive
+installations ask for a password twice in the terminal; there is no generated
+setup code. After upgrading an existing installation, or to reset the password:
+
+```sh
+off-proxy password
+```
+
+The entry is hidden (including pasted text) and is passed on stdin, never as a
+command argument. Use 12–256 characters. Until setup is complete, existing API
+clients and synchronization continue, but no dashboard data or controls are
+available without a session. There is no public GUI search in this version.
+
+**Access & API** provides:
+
+- Inactivity timeout: 30 minutes (default), 8 hours, a custom duration, or no
+  inactivity timeout. Status polling does not keep sessions alive; user activity
+  does. Cookies persist across browser restarts, with a one-year maximum lifetime.
+- Sign out, sign out all sessions, and change the password using the current
+  password. A password change or terminal reset revokes all sessions.
+- Reveal/hide the stored API key with the eye or copy it while hidden. Set your
+  own 24–256 character key or generate a new one. Confirm and save the change;
+  the old key stops working immediately, including for existing API clients.
+- Require an API key (default), or explicitly confirm keyless **product API**
+  lookups. Statistics, GUI lookup, settings, import controls and `/health` are
+  never made public by that switch.
+
+Existing product data, synchronization settings and API keys are retained.
+`API_TOKEN` in `.env` bootstraps the persistent access record on first start only.
+After rotation, the current key is stored recoverably in MongoDB so an authenticated
+administrator can reveal it. Status/update/test commands read the current key;
+`.env` remains unchanged. A rollback to software before 0.1.7 uses its original
+`.env` key again and does not provide this GUI protection.
+
+Passwords use a salted PBKDF2-HMAC-SHA256 hash with 600,000 iterations. Session
+tokens are random, stored only as hashes, and sent in HttpOnly, SameSite=Strict
+cookies. Failed logins are rate-limited persistently. Controls require a session
+and CSRF token. These choices follow the [OWASP password guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+and [session guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+
+Use HTTPS for domain access. The reverse proxy must set `X-Forwarded-Proto: https`
+for Secure cookies and overwrite client-supplied forwarded headers. Direct plain
+HTTP remains supported for trusted local test networks; it does not encrypt the
+password or product traffic. No password or API key belongs in a URL.
+Product editing is not available. Import controls use the existing single worker.
 
 Progress shows processed records and compressed download bytes when a content
 length is available. A full first import has no known total record count, so no
@@ -136,7 +173,8 @@ Progress starts being recorded by the updated worker on its next import.
 On the server, with an imported cosmetic dataset:
 
 ```sh
-TOKEN=$(sed -n 's/^API_TOKEN=//p' /opt/off-proxy-server/.env)
+read -r -s -p 'Current API key: ' TOKEN
+printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
   'http://127.0.0.1:8097/api/v3/product/0000527000057.json?product_type=beauty&fields=code,product_name,brands,quantity'
 unset TOKEN

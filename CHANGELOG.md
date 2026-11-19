@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.7
+
+- EN: Protect GUI data and controls with administrator login, salted password hashes,
+  revocable persistent sessions, configurable inactivity expiry and login rate limits.
+  Set/reset the password with `off-proxy password`; fresh interactive installs prompt
+  directly. Preserve existing API keys, data and network settings.
+- EN: Add key reveal/copy/generation/rotation and explicit optional keyless product
+  API access. Management and GUI search always require login. Management commands
+  use the current stored key after rotation. Public search remains deferred.
+- DE: GUI-Daten und Steuerung mit Anmeldung, Passwort-Hashes, widerrufbaren dauerhaften
+  Sitzungen, einstellbarem Inaktivitätsablauf und begrenzten Fehlversuchen schützen.
+  Passwort über `off-proxy password` setzen/zurücksetzen; neue interaktive Installationen
+  fragen direkt. Vorhandene Schlüssel, Daten und Netzwerkeinstellungen bleiben erhalten.
+- DE: Schlüssel anzeigen/kopieren/generieren/wechseln; Produkt-API optional ausdrücklich
+  ohne Schlüssel freigeben. Verwaltung und GUI-Suche bleiben geschützt. Shell-Befehle
+  nutzen nach einem Wechsel den aktuellen Schlüssel. Öffentliche Suche später.
+
 ## 0.1.6
 
 - EN: Scope the lookup form grid to the lookup form. Redesign settings and full-import

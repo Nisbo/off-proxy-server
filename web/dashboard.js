@@ -2,7 +2,7 @@
 (() => {
   const labels = {
     en: {
-      eyebrow: "YOUR LOCAL PRODUCT MIRROR", warning: "Early development · Test use only. This dashboard has no login. The product API still requires its key.",
+      eyebrow: "YOUR LOCAL PRODUCT MIRROR", warning: "Early development · Test use only. Keep backups before updates.",
       records: "Published records", recordHint: "All available datasets · metadata count", storage: "MongoDB storage", storageHint: "Data + indexes, including ongoing imports",
       nextCheck: "Next synchronization", datasets: "Available datasets", live: "LIVE STATUS", activity: "Synchronization", transfer: "Download", datasetHeading: "Your datasets", refresh: "Refresh display",
       lookupEyebrow: "LOCAL LOOKUP", lookup: "Find a product", lookupHint: "Search by EAN across all four datasets. Leading zeros are preserved. No data is changed.",
@@ -17,7 +17,7 @@
       foundTime: "Local lookup: {ms} ms", noName: "Product without a name", noValue: "Not specified", connectionError: "Status could not be refreshed. Previously loaded values may be out of date.", loading: "Connecting…"
     },
     de: {
-      eyebrow: "DEIN LOKALER PRODUKTBESTAND", warning: "Frühe Entwicklung · Nur zum Testen verwenden. Diese Oberfläche hat keine Anmeldung. Die Produkt-API benötigt weiterhin ihren Schlüssel.",
+      eyebrow: "DEIN LOKALER PRODUKTBESTAND", warning: "Frühe Entwicklung · Nur zum Testen verwenden. Vor Updates eine Datensicherung erstellen.",
       records: "Veröffentlichte Datensätze", recordHint: "Alle verfügbaren Bestände · Metadatenzählung", storage: "MongoDB-Speicher", storageHint: "Daten + Indizes, inklusive laufender Importe",
       nextCheck: "Nächster Abgleich", datasets: "Verfügbare Bestände", live: "LIVE-STATUS", activity: "Synchronisierung", transfer: "Download", datasetHeading: "Deine Datenbestände", refresh: "Anzeige aktualisieren",
       lookupEyebrow: "LOKALE ABFRAGE", lookup: "Produkt finden", lookupHint: "Per EAN in allen vier Beständen suchen. Führende Nullen bleiben erhalten. Es werden keine Daten verändert.",
@@ -78,10 +78,39 @@
     fullQueued: "Vollimport bestätigt und vorgemerkt.", saved: "Einstellungen gespeichert. Sie gelten ab der nächsten Bestandsprüfung.", controlError: "Anfrage fehlgeschlagen. Bitte die Anzeige aktualisieren und erneut versuchen.",
     gapOverview: "Verfügbar, mit unvollständiger Delta-Abdeckung", jobFailed: "Letzte Anforderung fehlgeschlagen: {error}"
   });
+  Object.assign(labels.en, {
+    protectedAccess: "PROTECTED ACCESS", loginTitle: "Welcome back", loginHelp: "Sign in with your administrator password.",
+    setupHelp: "The dashboard is locked. Set your password in the server terminal:", password: "Password", login: "Sign in", logout: "Sign out",
+    invalid_password: "Incorrect password.", login_limited: "Too many attempts. Wait five minutes and try again.", password_not_configured: "Please set a password in the server terminal first.",
+    sessionExpired: "Your session ended. Please sign in again.", access: "Access & API", accessHelp: "Manage sessions, your password and product API access.",
+    sessionDuration: "Sign out after inactivity", session30: "30 minutes", session480: "8 hours", sessionNever: "Stay signed in", sessionCustom: "Custom duration…", idleMinutes: "Minutes",
+    sessionHelp: "Automatic status polling does not extend your session. Changes apply to all sessions. A password change signs out every session.", logoutAll: "Sign out all sessions",
+    apiRequired: "Require an API key", apiPolicyHelp: "Applies only to product API lookups. Dashboard, statistics, settings and imports always require sign-in.",
+    publicApiConsent: "I allow product API requests without a key. Anyone who can reach this server can query products.",
+    apiKey: "API key", keyHelp: "Leave unchanged to keep the current key. Use the eye to reveal it or copy it while hidden. A new key takes effect when saved.", copy: "Copy", copied: "Copied", generate: "Generate new key",
+    keyChangeConsent: "Connected applications must use the new key after saving. The old key stops working immediately.",
+    changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", repeatPassword: "Repeat new password", passwordHelp: "Use 12–256 characters. All sessions will be signed out.",
+    passwordMismatch: "The new passwords do not match or contain fewer than 12 characters.", showSecret: "Show", hideSecret: "Hide", accessSaved: "Access settings saved.", storedKey: "Stored key", copyFailed: "Copy failed. Reveal the key and copy it manually."
+  });
+  Object.assign(labels.de, {
+    protectedAccess: "GESCHÜTZTER ZUGRIFF", loginTitle: "Willkommen zurück", loginHelp: "Melde dich mit deinem Administrator-Passwort an.",
+    setupHelp: "Die Oberfläche ist gesperrt. Lege dein Passwort im Terminal des Servers fest:", password: "Passwort", login: "Anmelden", logout: "Abmelden",
+    invalid_password: "Das Passwort ist falsch.", login_limited: "Zu viele Versuche. Bitte fünf Minuten warten und erneut versuchen.", password_not_configured: "Bitte zuerst im Server-Terminal ein Passwort festlegen.",
+    sessionExpired: "Deine Sitzung ist beendet. Bitte erneut anmelden.", access: "Zugriff & API", accessHelp: "Verwalte Sitzungen, dein Passwort und den Zugriff auf die Produkt-API.",
+    sessionDuration: "Nach Inaktivität abmelden", session30: "30 Minuten", session480: "8 Stunden", sessionNever: "Angemeldet bleiben", sessionCustom: "Eigene Dauer …", idleMinutes: "Minuten",
+    sessionHelp: "Automatische Statusabfragen verlängern die Sitzung nicht. Änderungen gelten für alle Sitzungen. Eine Passwortänderung meldet alle Sitzungen ab.", logoutAll: "Alle Sitzungen abmelden",
+    apiRequired: "API-Schlüssel erforderlich", apiPolicyHelp: "Gilt nur für Produktabfragen über die API. Oberfläche, Statistiken, Einstellungen und Importe erfordern immer eine Anmeldung.",
+    publicApiConsent: "Ich erlaube Produktabfragen ohne Schlüssel. Jeder, der diesen Server erreicht, kann Produkte abfragen.",
+    apiKey: "API-Schlüssel", keyHelp: "Unverändert lassen, um den bisherigen Schlüssel zu behalten. Mit dem Auge anzeigen oder verdeckt kopieren. Ein neuer Schlüssel gilt erst nach dem Speichern.", copy: "Kopieren", copied: "Kopiert", generate: "Neuen Schlüssel generieren",
+    keyChangeConsent: "Angeschlossene Anwendungen benötigen nach dem Speichern den neuen Schlüssel. Der alte funktioniert dann sofort nicht mehr.",
+    changePassword: "Passwort ändern", currentPassword: "Aktuelles Passwort", newPassword: "Neues Passwort", repeatPassword: "Neues Passwort wiederholen", passwordHelp: "12–256 Zeichen verwenden. Alle Sitzungen werden abgemeldet.",
+    passwordMismatch: "Die neuen Passwörter stimmen nicht überein oder enthalten weniger als 12 Zeichen.", showSecret: "Anzeigen", hideSecret: "Verbergen", accessSaved: "Zugriffseinstellungen gespeichert.", storedKey: "Gespeicherter Schlüssel", copyFailed: "Kopieren fehlgeschlagen. Bitte Schlüssel einblenden und manuell kopieren."
+  });
   const kinds = ["food", "beauty", "petfood", "product"];
   const $ = id => document.getElementById(id);
   let language = navigator.language.toLowerCase().startsWith("de") ? "de" : "en";
   try { const saved = localStorage.getItem("off-proxy-language"); if (saved === "de" || saved === "en") language = saved; } catch (_) {}
+  let authenticated = false, authNonce = "", accessOptions = null, apiKeyDirty = false, lastActivity = 0;
   let controlBusy = false, controlNotice = null, fullKind = null;
   let snapshot = null, lookupResult = null, lookupNotice = null, polling = false, lookupSequence = 0, lookupController = null, offset = 0, connected = false, attemptedConnection = false;
   const t = (key, vars = {}) => Object.entries(vars).reduce((s, [name, value]) => s.replaceAll(`{${name}}`, String(value)), labels[language][key] || key);
@@ -135,6 +164,7 @@
     $("sync").disabled = controlBusy || !connected || ["pending", "running"].includes(syncJob);
     setText("sync", t(syncJob === "pending" ? "queued" : syncJob === "running" ? "runningJob" : "syncNow"));
     $("settings").disabled = !connected || controlBusy;
+    $("access").disabled = !connected || controlBusy;
     $("control-message").hidden = !controlNotice;
     if (controlNotice) setText("control-message", t(controlNotice));
     for (const kind of kinds) {
@@ -201,15 +231,19 @@
     $("language").value = language;
     for (const element of document.querySelectorAll("[data-i18n]")) element.textContent = t(element.dataset.i18n);
     for (const button of document.querySelectorAll(".dialog-close")) button.setAttribute("aria-label", t("close"));
+    for (const id of ["login-eye", "api-eye"]) $(id).setAttribute("aria-label", t($(id === "api-eye" ? "api-key" : "login-password").type === "password" ? "showSecret" : "hideSecret"));
+    $("api-key").placeholder = t("storedKey");
     renderStatus(); renderLookup();
     if (fullKind) setText("full-dataset", t(fullKind));
     if (!$("connection-error").hidden) setText("connection-error", t("connectionError"));
   }
   async function pollStatus() {
+    if (!authenticated) { await checkAuth(); return; }
     if (polling) return;
     polling = true;
     try {
       const response = await fetch("/ui/status", {cache: "no-store", signal: AbortSignal.timeout(12000)});
+      if (response.status === 401) { lockGui("sessionExpired"); return; }
       if (!response.ok) throw new Error("status unavailable");
       const data = await response.json();
       snapshot = data; offset = data.server_epoch - Date.now() / 1000; connected = true;
@@ -219,6 +253,132 @@
       setText("connection-error", t("connectionError"));
     } finally { polling = false; attemptedConnection = true; renderStatus(); }
   }
+  const eye = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  $("login-eye").innerHTML = eye; $("api-eye").innerHTML = eye;
+  function lockGui(message) {
+    authenticated = false; snapshot = null; connected = false; lookupResult = null;
+    $("dashboard-content").hidden = true; $("login-panel").hidden = false; $("logout").hidden = true;
+    for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
+    for (const id of ["api-key", "current-password", "new-password", "repeat-password", "login-password"]) $(id).value = "";
+    $("api-key").type = "password"; $("login-password").type = "password";
+    $("login-error").hidden = !message; if (message) setText("login-error", t(message));
+  }
+  async function checkAuth() {
+    try {
+      const response = await fetch("/auth/status", {cache:"no-store", signal:AbortSignal.timeout(12000)});
+      if (!response.ok) throw new Error("auth unavailable");
+      const data = await response.json(); authNonce = data.control_nonce;
+      $("setup-help").hidden = $("setup-command").hidden = data.configured;
+      $("login-form").hidden = !data.configured; $("login-help").hidden = !data.configured;
+      if (data.authenticated) {
+        authenticated = true; $("dashboard-content").hidden = false; $("login-panel").hidden = true; $("logout").hidden = false;
+        await pollStatus();
+      } else if (authenticated) lockGui("sessionExpired");
+    } catch (_) { $("login-error").hidden = false; setText("login-error", t("connectionError")); }
+  }
+  async function authPost(path, values = {}) {
+    const response = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json", "X-Off-Proxy-Control":authNonce}, body:JSON.stringify(values), signal:AbortSignal.timeout(12000)});
+    const data = await response.json();
+    if (!response.ok) { if (response.status === 401 && data.error === "authentication_required") lockGui("sessionExpired"); const error = new Error(data.error || "controlError"); error.status = response.status; throw error; }
+    return data;
+  }
+  $("login-eye").addEventListener("click", () => {
+    $("login-password").type = $("login-password").type === "password" ? "text" : "password"; translate();
+  });
+  $("login-form").addEventListener("submit", async event => {
+    event.preventDefault(); $("login-submit").disabled = true; $("login-error").hidden = true;
+    try { const status = await (await fetch("/auth/status", {cache:"no-store"})).json(); if (status.authenticated) { await checkAuth(); return; } authNonce = status.control_nonce; await authPost("/auth/login", {password:$("login-password").value}); $("login-password").value = ""; lastActivity = Date.now(); await checkAuth(); }
+    catch (error) { $("login-error").hidden = false; setText("login-error", t(labels[language][error.message] ? error.message : "controlError")); }
+    finally { $("login-submit").disabled = false; }
+  });
+  $("logout").addEventListener("click", async () => {
+    try { await authPost("/auth/logout"); lockGui(); await checkAuth(); }
+    catch (_) { controlNotice = "controlError"; renderStatus(); }
+  });
+  async function activity() {
+    if (!authenticated || Date.now()-lastActivity < 30000) return;
+    lastActivity = Date.now();
+    try { await authPost("/auth/activity"); } catch (error) { if (error.status === 401) lockGui("sessionExpired"); }
+  }
+  for (const event of ["pointerdown", "keydown", "wheel", "touchstart"]) document.addEventListener(event, activity, {passive:true});
+  function accessMessage(key) { $("access-message").hidden = false; setText("access-message", t(key)); }
+  function updateSessionInput() {
+    const custom = $("session-duration").value === "custom";
+    $("idle-minutes").hidden = $("idle-label").hidden = !custom; $("idle-minutes").required = custom;
+    $("idle-minutes").disabled = !custom;
+  }
+  $("session-duration").addEventListener("change", updateSessionInput);
+  $("access").addEventListener("click", async () => {
+    try {
+      const response = await fetch("/ui/security", {cache:"no-store"});
+      if (response.status === 401) { lockGui("sessionExpired"); return; }
+      if (!response.ok) throw new Error("access failed");
+      accessOptions = await response.json();
+      const minutes = String(accessOptions.idle_minutes);
+      $("session-duration").value = ["0","30","480"].includes(minutes) ? minutes : "custom";
+      $("idle-minutes").value = minutes === "0" ? "30" : minutes; updateSessionInput();
+      $("api-required").checked = accessOptions.api_auth_required;
+      $("public-api-consent").hidden = true; $("confirm-public-api").checked = false; $("confirm-public-api").required = false;
+      $("key-change-consent").hidden = true; $("confirm-key-change").checked = false; $("confirm-key-change").required = false;
+      for (const id of ["api-key","current-password","new-password","repeat-password"]) $(id).value = "";
+      $("api-key").type = "password"; apiKeyDirty = false; $("access-message").hidden = true; $("api-copy").textContent = t("copy");
+      $("access-dialog").showModal(); translate();
+    } catch (_) { controlNotice = "controlError"; renderStatus(); }
+  });
+  $("api-required").addEventListener("change", () => {
+    const consent = !$("api-required").checked && accessOptions.api_auth_required;
+    $("public-api-consent").hidden = !consent; $("confirm-public-api").required = consent;
+  });
+  function keyChanged() {
+    apiKeyDirty = true; $("key-change-consent").hidden = false; $("confirm-key-change").required = true;
+  }
+  $("api-key").addEventListener("input", keyChanged);
+  async function currentKey() {
+    const response = await fetch("/ui/api-key", {headers:{"X-Off-Proxy-Control":authNonce}, cache:"no-store"});
+    if (response.status === 401) { lockGui("sessionExpired"); throw new Error("expired"); }
+    if (!response.ok) throw new Error("key failed");
+    return (await response.json()).api_token;
+  }
+  $("api-eye").addEventListener("click", async () => {
+    try { if (!$("api-key").value) $("api-key").value = await currentKey(); $("api-key").type = $("api-key").type === "password" ? "text" : "password"; translate(); }
+    catch (_) { accessMessage("controlError"); }
+  });
+  $("api-copy").addEventListener("click", async () => {
+    try {
+      const value = $("api-key").value || await currentKey();
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(value);
+      else {
+        const area=document.createElement("textarea"); area.value=value; area.className="clipboard-helper"; $("access-dialog").append(area); area.select();
+        const copied=document.execCommand("copy"); area.remove(); if (!copied) throw new Error("copy failed");
+      }
+      setText("api-copy", t("copied"));
+    } catch (_) { accessMessage("copyFailed"); }
+  });
+  $("api-generate").addEventListener("click", () => {
+    $("api-key").value = Array.from(crypto.getRandomValues(new Uint8Array(32)), x=>x.toString(16).padStart(2,"0")).join(""); keyChanged();
+  });
+  $("access-form").addEventListener("submit", async event => {
+    event.preventDefault(); $("access-save").disabled = true;
+    try {
+      const values = {idle_minutes:Number($("session-duration").value === "custom" ? $("idle-minutes").value : $("session-duration").value), api_auth_required:$("api-required").checked, confirm_public_api:$("confirm-public-api").checked};
+      if (apiKeyDirty) values.api_token = $("api-key").value;
+      accessOptions = await authPost("/ui/security", values); apiKeyDirty = false;
+      $("access-dialog").close(); $("api-key").value = ""; controlNotice = "accessSaved"; renderStatus();
+    } catch (error) { if (error.status === 401) lockGui("sessionExpired"); else accessMessage("controlError"); }
+    finally { $("access-save").disabled = false; }
+  });
+  $("logout-all").addEventListener("click", async () => {
+    try { await authPost("/auth/logout-all"); lockGui("sessionExpired"); await checkAuth(); }
+    catch (_) { accessMessage("controlError"); }
+  });
+  $("password-save").addEventListener("click", async () => {
+    if ($("new-password").value.length < 12 || $("new-password").value !== $("repeat-password").value) { accessMessage("passwordMismatch"); return; }
+    $("password-save").disabled = true;
+    try { await authPost("/auth/password", {current_password:$("current-password").value, new_password:$("new-password").value}); lockGui("sessionExpired"); await checkAuth(); }
+    catch (error) { if (error.message === "invalid_password") accessMessage("invalid_password"); else if (error.status === 401) lockGui("sessionExpired"); else accessMessage("controlError"); }
+    finally { $("password-save").disabled = false; }
+  });
+  $("access-dialog").addEventListener("close", () => { for (const id of ["api-key","current-password","new-password","repeat-password"]) $(id).value = ""; });
   $("language").addEventListener("change", () => {
     language = $("language").value;
     try { localStorage.setItem("off-proxy-language", language); } catch (_) {}
@@ -229,6 +389,7 @@
     controlBusy = true; renderStatus();
     try {
       const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-Off-Proxy-Control": snapshot.control_nonce}, body: JSON.stringify(values), signal: AbortSignal.timeout(12000)});
+      if (response.status === 401) { lockGui("sessionExpired"); return false; }
       if (!response.ok) throw new Error("control failed");
       return true;
     } catch (_) { controlNotice = "controlError"; return false; }
@@ -282,6 +443,7 @@
       const params = new URLSearchParams({ean: code, lc: language, product_type: $("lookup-type").value});
       const response = await fetch(`/ui/lookup?${params}`, {cache: "no-store", signal: controller.signal});
       const data = await response.json();
+      if (response.status === 401) { lockGui("sessionExpired"); return; }
       if (sequence !== lookupSequence) return;
       if (response.ok) { lookupResult = data; lookupNotice = null; }
       else { lookupNotice = response.status === 404 ? "notFound" : data.error === "datasets_not_ready" ? "notReady" : data.error === "database_unavailable" ? "databaseError" : "requestError"; }
@@ -293,7 +455,7 @@
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) pollStatus(); });
   translate(); setText("activity-text", t("loading"));
-  pollStatus();
+  checkAuth();
   setInterval(() => { if (!document.hidden) pollStatus(); }, 5000);
   setInterval(() => { if (!document.hidden) updateCountdown(); }, 1000);
 })();

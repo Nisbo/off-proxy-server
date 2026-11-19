@@ -109,21 +109,63 @@ mehrere Stunden. Ein unterbrochener, unfertiger Vollimport benötigt eine neue
 Bestätigung und beginnt dann erneut; veröffentlichte Bestände bleiben erhalten.
 Bei einer Erstinstallation die Oberfläche öffnen und den Erstimport pro Bestand bestätigen.
 
-## Testoberfläche (vorerst ohne Anmeldung)
+## Geschützte Oberfläche und API-Zugriff
 
 Nach dem Update im Browser `http://<BIND_IP>:8097/` öffnen. Ein Browser direkt
 auf dem Server kann `http://127.0.0.1:8097/` verwenden. Die Oberfläche unterstützt
 Deutsch und Englisch; die Sprachauswahl wird lokal im Browser gespeichert.
 
-**Die GUI ist in dieser Testversion absichtlich ohne Anmeldung erreichbar. Wer
-den Port erreichen kann, kann Daten abfragen, Abgleiche anfordern und die
-Importeinstellungen ändern.** Nur im vertrauenswürdigen lokalen/VPN-Netz nutzen.
-Die Steuerung nutzt Same-Origin-Anfragen mit CSRF-Schutz; das ist keine Anmeldung.
-Die bisherigen Routen
-`/health` und `/api/v3/product/...` verlangen weiterhin den API-Schlüssel. Dieser
-wird weder in die Webseite eingebaut noch an den Browser ausgegeben. Produkte
-lassen sich nicht in der GUI bearbeiten. Importaufträge führt ausschließlich
-der vorhandene Hintergrunddienst aus; die GUI startet keinen zweiten Importer.
+Die Oberfläche bleibt gesperrt, bis du ein Administrator-Passwort festlegst.
+Bei einer neuen interaktiven Installation wird dein selbst gewähltes Passwort
+zweimal im Terminal abgefragt. Es gibt keinen erzeugten Einrichtungscode.
+Nach dem Update einer bestehenden Installation oder zum Zurücksetzen:
+
+```sh
+off-proxy password
+```
+
+Die Eingabe bleibt verdeckt, auch beim Einfügen. Das Passwort wird nur über die
+Standardeingabe weitergegeben, niemals als Befehlsargument. 12–256 Zeichen verwenden.
+Bis zur Einrichtung funktionieren vorhandene API-Clients und die Synchronisierung
+weiter; GUI-Daten und Steuerung sind gesperrt. Eine öffentliche GUI-Suche ist in
+dieser Version nicht enthalten.
+
+Unter **Zugriff & API**:
+
+- Nach Inaktivität abmelden: 30 Minuten (Standard), 8 Stunden, eigene Dauer oder
+  kein Inaktivitätsablauf. Statusabfragen verlängern die Sitzung nicht, Bedienung
+  dagegen schon. Cookies überstehen Browser-Neustarts, maximal für ein Jahr.
+- Abmelden, alle Sitzungen abmelden und Passwort mit dem aktuellen Passwort ändern.
+  Passwortänderung und Zurücksetzen im Terminal widerrufen alle Sitzungen.
+- Gespeicherten API-Schlüssel mit dem Auge anzeigen/verbergen oder verdeckt kopieren.
+  Eigenen Schlüssel mit 24–256 Zeichen festlegen oder einen neuen generieren.
+  Änderung bestätigen und speichern: Der alte Schlüssel funktioniert dann sofort
+  nicht mehr, auch bei bereits angeschlossenen API-Clients.
+- API-Schlüssel verlangen (Standard) oder **Produkt-API** ohne Schlüssel ausdrücklich
+  freigeben. Statistiken, GUI-Abfrage, Einstellungen, Importsteuerung und `/health`
+  werden dadurch niemals öffentlich.
+
+Produktdaten, Abgleicheinstellungen und vorhandene API-Schlüssel bleiben erhalten.
+`API_TOKEN` aus `.env` dient nur beim ersten Start zur Übernahme in den dauerhaften
+Zugriffsdatensatz. Nach einem Wechsel liegt der aktuelle Schlüssel wieder auslesbar
+in MongoDB, damit ein angemeldeter Administrator ihn anzeigen kann. Status, Update
+und Test lesen diesen aktuellen Schlüssel; `.env` bleibt unverändert. Ein Rollback
+auf Software vor 0.1.7 nutzt wieder den ursprünglichen `.env`-Schlüssel und bietet
+diesen GUI-Schutz nicht.
+
+Passwörter werden mit individuellem Salt und PBKDF2-HMAC-SHA256 mit 600.000
+Iterationen gehasht. Zufällige Sitzungstokens liegen nur als Hash vor und werden
+in HttpOnly-/SameSite=Strict-Cookies übertragen. Fehlversuche werden dauerhaft
+begrenzt; Steuerungsaktionen erfordern Sitzung und CSRF-Token. Grundlage sind die
+[OWASP-Passwortempfehlungen](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+und [Sitzungsempfehlungen](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+
+Domain-Zugriff über HTTPS nutzen. Der Reverse Proxy muss `X-Forwarded-Proto: https`
+setzen und vom Client mitgebrachte Forwarded-Header überschreiben; dann erhält
+das Cookie das Secure-Attribut. Direktes HTTP bleibt für vertrauenswürdige lokale
+Testnetze möglich, verschlüsselt aber weder Passwort noch Produktabfragen.
+Passwörter und API-Schlüssel gehören nicht in URLs. Produkte lassen sich nicht
+bearbeiten; Importaufträge führt der vorhandene einzige Hintergrunddienst aus.
 
 Der Fortschritt zeigt verarbeitete Datensätze und heruntergeladene komprimierte
 Bytes, sofern die Quelle ihre Gesamtgröße angibt. Eine Gesamtzahl von Datensätzen
@@ -146,7 +188,8 @@ Import des aktualisierten Hintergrunddienstes erfasst.
 Nach erfolgreichem Kosmetikimport auf dem Server:
 
 ```sh
-TOKEN=$(sed -n 's/^API_TOKEN=//p' /opt/off-proxy-server/.env)
+read -r -s -p 'Aktueller API-Schlüssel: ' TOKEN
+printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
   'http://127.0.0.1:8097/api/v3/product/0000527000057.json?product_type=beauty&fields=code,product_name,brands,quantity'
 unset TOKEN

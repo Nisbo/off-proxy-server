@@ -26,8 +26,9 @@ from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
+import security
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -452,7 +453,8 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, db, token):
         super().__init__(address, Handler)
-        self.db, self.token = db, token
+        self.db = db
+        self.security = security.Security(db, token)
         self.dashboard = Dashboard(db, VERSION, PROJECTS)
         self.control_nonce = secrets.token_urlsafe(32)
         self.slots = threading.BoundedSemaphore(8)
@@ -479,8 +481,10 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(15)
 
-    def send_body(self, status, body, content_type):
+    def send_body(self, status, body, content_type, cookie=None):
         self.send_response(status)
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -489,22 +493,48 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; "
                          "connect-src 'self'; img-src 'self' data: https://images.openfoodfacts.org "
                          "https://images.openbeautyfacts.org https://images.openpetfoodfacts.org "
-                         "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'")
+                         "https://images.openproductsfacts.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header("X-Data-Attribution", "Open Food Facts contributors; ODbL-1.0")
         self.end_headers()
         self.wfile.write(body)
 
-    def send_json(self, status, payload):
+    def send_json(self, status, payload, cookie=None):
         self.send_body(status, json_util.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                       "application/json; charset=utf-8")
+                       "application/json; charset=utf-8", cookie)
+
+    def current_session(self):
+        return self.server.security.session(self.headers.get("Cookie", ""))
+
+    def session_cookie(self, raw=""):
+        secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        return (f"{security.COOKIE}={raw}; Path=/; HttpOnly; SameSite=Strict; "
+                f"Max-Age={security.MAX_AGE if raw else 0}" + ("; Secure" if secure else ""))
 
     def public_dashboard(self, parsed):
         if parsed.path in ASSETS:
             filename, content_type = ASSETS[parsed.path]
             self.send_body(200, (WEB / filename).read_bytes(), content_type)
             return True
+        session = self.current_session() if parsed.path == "/auth/status" or parsed.path.startswith("/ui/") else None
+        if parsed.path == "/auth/status":
+            self.send_json(200, {"authenticated": bool(session),
+                "configured": bool(self.server.security.config()["password_hash"]),
+                "control_nonce": session["csrf"] if session else self.server.control_nonce})
+            return True
+        if parsed.path.startswith("/ui/") and not session:
+            self.send_json(401, {"error": "authentication_required"})
+            return True
+        if parsed.path == "/ui/security":
+            self.send_json(200, self.server.security.public_settings())
+            return True
+        if parsed.path == "/ui/api-key":
+            if not hmac.compare_digest(self.headers.get("X-Off-Proxy-Control", "").encode(), session["csrf"].encode()):
+                self.send_json(403, {"error": "control_denied"})
+            else:
+                self.send_json(200, {"api_token": self.server.security.api_key()})
+            return True
         if parsed.path == "/ui/status":
-            self.send_json(200, {**self.server.dashboard.snapshot(), "control_nonce": self.server.control_nonce})
+            self.send_json(200, {**self.server.dashboard.snapshot(), "control_nonce": session["csrf"]})
             return True
         if parsed.path == "/ui/lookup":
             params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
@@ -531,11 +561,13 @@ class Handler(BaseHTTPRequestHandler):
             LOG.exception("Dashboard request failed")
             self.send_json(503, {"error": "database_unavailable"})
             return
-        expected = "Bearer " + self.server.token
-        if not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
-            self.send_json(401, {"error": "authentication_required"})
-            return
         try:
+            expected = "Bearer " + self.server.security.api_key()
+            public_product = (not self.server.security.config()["api_auth_required"]
+                              and re.fullmatch(r"/api/v3/product/[0-9]+(?:\.json)?", parsed.path))
+            if not public_product and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected.encode()):
+                self.send_json(401, {"error": "authentication_required"})
+                return
             parsed = urllib.parse.urlsplit(self.path)
             if parsed.path == "/health":
                 states = {state.pop("_id"): state for state in self.server.db.state.find({})}
@@ -574,23 +606,44 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(503, {"error": "database_unavailable"})
 
     def do_POST(self):
-        # No login is intentional for this LAN test UI. This nonce is CSRF protection,
-        # not authentication, and is unrelated to the protected product API key.
-        origin = urllib.parse.urlsplit(self.headers.get("Origin", ""))
-        if (not hmac.compare_digest(self.headers.get("X-Off-Proxy-Control", ""), self.server.control_nonce)
-                or self.headers.get("Sec-Fetch-Site") == "cross-site"
-                or (origin.netloc and origin.netloc != self.headers.get("Host"))):
-            self.send_json(403, {"error": "control_denied"})
-            return
         try:
+            session = self.current_session()
+            path = urllib.parse.urlsplit(self.path).path
+            if path != "/auth/login" and not session:
+                raise security.Denied()
+            origin = urllib.parse.urlsplit(self.headers.get("Origin", ""))
+            expected = self.server.control_nonce if path == "/auth/login" else session["csrf"]
+            if (not hmac.compare_digest(self.headers.get("X-Off-Proxy-Control", "").encode(), expected.encode())
+                    or self.headers.get("Sec-Fetch-Site") == "cross-site"
+                    or (origin.netloc and origin.netloc != self.headers.get("Host"))):
+                raise security.Denied("control_denied", 403)
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 4096 or self.headers.get_content_type() != "application/json":
                 raise ValueError("Invalid request body")
             values = json.loads(self.rfile.read(length))
             if not isinstance(values, dict):
                 raise ValueError("Expected an object")
-            path = urllib.parse.urlsplit(self.path).path
-            if path == "/ui/settings":
+            if path == "/auth/login":
+                raw = self.server.security.login(values.get("password"), self.client_address[0])
+                self.send_json(200, {"ok": True}, self.session_cookie(raw))
+            elif path == "/auth/logout":
+                self.server.db.sessions.delete_one({"_id": session["_id"]})
+                self.send_json(200, {"ok": True}, self.session_cookie())
+            elif path == "/auth/logout-all":
+                self.server.security.revoke_all()
+                self.send_json(200, {"ok": True}, self.session_cookie())
+            elif path == "/auth/activity":
+                self.server.security.activity(session)
+                self.send_json(200, {"ok": True})
+            elif path == "/auth/password":
+                self.server.security.limit_login(self.client_address[0])
+                if not security.password_matches(values.get("current_password"), self.server.security.config()["password_hash"]):
+                    raise security.Denied("invalid_password")
+                self.server.security.set_password(values.get("new_password"))
+                self.send_json(200, {"ok": True}, self.session_cookie())
+            elif path == "/ui/security":
+                self.send_json(200, self.server.security.save(values))
+            elif path == "/ui/settings":
                 self.send_json(200, {"settings": control.save_settings(self.server.db, values)})
             elif path == "/ui/sync" and not values:
                 queued = control.request(self.server.db, "sync")
@@ -604,6 +657,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(202, {"queued": queued})
             else:
                 self.send_json(400, {"error": "invalid_control"})
+        except security.Denied as error:
+            self.send_json(error.status, {"error": error.code})
         except (ValueError, TypeError):
             self.send_json(400, {"error": "invalid_control"})
         except PyMongoError:
@@ -622,6 +677,18 @@ def main():
         signal.signal(signal.SIGTERM, lambda *_: STOP.set())
         signal.signal(signal.SIGINT, lambda *_: STOP.set())
         return sync_loop(db, once=mode == "sync-once")
+    if mode in ("password", "password-configured"):
+        access = security.Security(db, os.environ.get("API_TOKEN", ""))
+        if mode == "password-configured":
+            print("yes" if access.config()["password_hash"] else "no")
+            return 0
+        try:
+            password = sys.stdin.buffer.readline(2048).decode().rstrip("\n")
+            access.set_password(password)
+        except (ValueError, UnicodeError) as error:
+            raise SystemExit(str(error))
+        print("Password saved; all sessions signed out / Passwort gespeichert; alle Sitzungen abgemeldet.")
+        return 0
     if mode != "api":
         raise SystemExit("Usage: app.py api|sync|sync-once")
     token = os.environ.get("API_TOKEN", "")

@@ -43,10 +43,13 @@ source=a[a.index('-f')+1]
 if 'ps' in a:
     if os.environ.get('FAKE_RUNNING','1')=='1':print('existing-worker')
     sys.exit(0)
-if 'exec' in a and any('MongoClient' in x for x in a):sys.exit(75 if os.environ.get('FAKE_BUSY')=='1' else 0)
+if 'exec' in a and any('busy=' in x for x in a):sys.exit(75 if os.environ.get('FAKE_BUSY')=='1' else 0)
 if 'exec' in a and any('sys.argv[1]' in x for x in a):
     sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source else 0)
 if 'build' in a and os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
+if a[-2:]==['app.py','password']:
+    data=sys.stdin.readline()
+    pathlib.Path(os.environ['FAKE_LOG']+'.password-length').write_text(str(len(data.rstrip('\\n'))))
 sys.exit(0)
 ''',
     }
@@ -59,7 +62,7 @@ sys.exit(0)
 
     def archive(release):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "dashboard.py", "control.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy"):
+            for name in ("app.py", "dashboard.py", "control.py", "security.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy"):
                 data = (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)
@@ -207,3 +210,54 @@ def test_unknown_existing_directory_is_not_overwritten(installation):
 def test_secrets_and_data_excluded_from_source_control():
     patterns = (SOURCE / ".gitignore").read_text().splitlines()
     assert all(name in patterns for name in (".env", "data/", "configdb/", "releases/", ".state/"))
+
+
+def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installation):
+    import pty
+    import select
+    import signal
+    import time
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    password = 'a-secret-typed-in-terminal'
+    child, terminal = pty.fork()
+    if child == 0:
+        os.execve('/bin/bash', ['bash', str(SOURCE/'off-proxy'), 'password'], env)
+    output = b''
+    sent = 0
+    done = False
+    try:
+        deadline = time.monotonic()+15
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([terminal], [], [], 0.1)
+            if readable:
+                try:
+                    part = os.read(terminal, 4096)
+                except OSError:
+                    break
+                if not part:
+                    break
+                output += part
+                if sent == 0 and b'Neues GUI-Passwort' in output:
+                    os.write(terminal, (password+'\n').encode()); sent = 1
+                if sent == 1 and b'Passwort wiederholen:' in output:
+                    os.write(terminal, (password+'\n').encode()); sent = 2
+            ended, status = os.waitpid(child, os.WNOHANG)
+            if ended:
+                done = True
+                assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors='replace')
+                break
+        if not done:
+            ended, status = os.waitpid(child, os.WNOHANG)
+            if ended:
+                done = True
+                assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors='replace')
+        assert done and sent == 2, output.decode(errors='replace')
+        assert password.encode() not in output
+        assert password not in log.read_text()
+        assert Path(str(log)+'.password-length').read_text() == str(len(password))
+    finally:
+        os.close(terminal)
+        if not done:
+            os.kill(child, signal.SIGKILL)
+            os.waitpid(child, 0)

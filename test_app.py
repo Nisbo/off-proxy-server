@@ -12,6 +12,9 @@ import pytest
 import yaml
 
 import app
+import security
+
+UI_COOKIES = {}
 
 
 @pytest.fixture
@@ -219,16 +222,24 @@ def test_one_source_failure_does_not_block_others(db):
 @pytest.fixture
 def http(db):
     server = app.Server(("127.0.0.1", 0), db, "x" * 32)
+    server.security.set_password("test-admin-password")
+    raw = server.security.login("test-admin-password", "fixture")
+    UI_COOKIES[f"http://127.0.0.1:{server.server_port}"] = f"{security.COOKIE}={raw}"
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_port}"
+    UI_COOKIES.pop(f"http://127.0.0.1:{server.server_port}", None)
     server.shutdown()
     server.server_close()
     thread.join()
 
 
 def get(url, auth=True):
-    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + "x" * 32} if auth else {})
+    headers = {"Authorization": "Bearer " + "x" * 32} if auth else {}
+    base = urllib.parse.urlsplit(url)
+    if base.path.startswith('/ui/'):
+        headers['Cookie'] = UI_COOKIES.get(f'{base.scheme}://{base.netloc}', '')
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req) as res:
             return res.status, json.load(res)
@@ -270,7 +281,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
     assert Path(".dockerignore").read_text().splitlines() == [
-        "*", "!app.py", "!dashboard.py", "!control.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
+        "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
 
@@ -307,7 +318,7 @@ def test_dashboard_assets_public_but_contain_no_api_key(http, path, content_type
         assert "x" * 32 not in body
 
 
-def test_dashboard_is_public_and_existing_api_remains_protected(http, db):
+def test_authenticated_dashboard_lookup_and_existing_api_remains_protected(http, db):
     publish(db, "beauty", product("0000527000057", internal_sensitive="must not be exposed"))
     status, data = get(http + "/ui/lookup?ean=0000527000057", auth=False)
     assert status == 200 and data["product"]["product_type"] == "beauty"
@@ -327,7 +338,7 @@ def test_dashboard_lookup_rejects_unsupported_requests(http, query):
     assert get(http + "/ui/lookup?" + query, auth=False)[0] == 400
 
 
-def test_public_status_redacts_internal_state_and_counts_published_records(http, db):
+def test_authenticated_status_redacts_internal_state_and_counts_published_records(http, db):
     publish(db)
     db.state.update_one({"_id": "food"}, {"$set": {"API_TOKEN": "private-value", "internal_path": "/private/path"}})
     db.scheduler.insert_one({"_id": "sync", "phase": "waiting", "next_check_epoch": 20000, "full_days": 14})
@@ -557,7 +568,7 @@ def test_automatic_full_imports_are_explicit_opt_in(db):
 
 
 def post_ui(base, path, values, nonce=None, origin=None):
-    headers = {'Content-Type': 'application/json'}
+    headers = {'Content-Type': 'application/json', 'Cookie': UI_COOKIES.get(base, '')}
     if nonce:
         headers['X-Off-Proxy-Control'] = nonce
     if origin:
@@ -580,7 +591,7 @@ def test_ui_control_requires_nonce_and_full_confirmation(http, db):
     assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': False}, nonce)[0] == 400
     assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': True}, nonce)[0] == 202
     assert db.requests.count_documents({'status': 'pending'}) == 2
-    assert db.list_collection_names() == ['requests']
+    assert not any(name.startswith(('food_', 'beauty_', 'petfood_', 'product_')) for name in db.list_collection_names())
     assert get(http + '/api/v3/product/123.json', auth=False)[0] == 401
 
 

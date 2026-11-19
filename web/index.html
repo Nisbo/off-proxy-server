@@ -6,16 +6,31 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.6">
-  <script defer src="/assets/dashboard.js?v=0.1.6"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.7">
+  <script defer src="/assets/dashboard.js?v=0.1.7"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><span class="version" id="version">0.1.6</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.7</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
-    <aside class="notice"><span aria-hidden="true">!</span><p data-i18n="warning">Early development · Test use only. This dashboard has no login. The product API still requires its key.</p></aside>
+    <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
+      <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
+      <h2 id="login-title" data-i18n="loginTitle">Sign in</h2>
+      <p class="muted" id="login-help" data-i18n="loginHelp">Enter your administrator password.</p>
+      <p class="muted" id="setup-help" data-i18n="setupHelp" hidden></p>
+      <code id="setup-command" hidden>off-proxy password</code>
+      <form id="login-form" method="post" action="/auth/login">
+        <input type="hidden" name="username" value="admin" autocomplete="username">
+        <label for="login-password" data-i18n="password">Password</label>
+        <div class="secret-field"><input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="256"><button type="button" class="secondary eye-button" id="login-eye" aria-label="Show password"></button></div>
+        <p id="login-error" class="error-message" role="status" hidden></p>
+        <button class="primary" type="submit" id="login-submit" data-i18n="login">Sign in</button>
+      </form>
+    </section>
+    <div id="dashboard-content" hidden>
+    <aside class="notice"><span aria-hidden="true">!</span><p data-i18n="warning">Early development · Test use only. Keep backups before updates.</p></aside>
     <section class="overview" aria-label="Overview">
       <div class="stat"><span data-i18n="records">Published records</span><strong id="total-records">—</strong><small data-i18n="recordHint">All available datasets · metadata count</small></div>
       <div class="stat"><span data-i18n="storage">MongoDB storage</span><strong id="storage">—</strong><small data-i18n="storageHint">Data + indexes, including ongoing imports</small></div>
@@ -29,7 +44,7 @@
       <p id="connection-error" class="error-message" role="status" hidden></p>
     </section>
     <section aria-labelledby="dataset-heading">
-      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><div class="control-actions"><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh display</button><button class="primary" id="sync" type="button" disabled data-i18n="syncNow">Synchronize now</button><button class="secondary" id="settings" type="button" disabled data-i18n="settings">Settings</button></div></div>
+      <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><div class="control-actions"><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh display</button><button class="primary" id="sync" type="button" disabled data-i18n="syncNow">Synchronize now</button><button class="secondary" id="access" type="button" disabled data-i18n="access">Access &amp; API</button><button class="secondary" id="settings" type="button" disabled data-i18n="settings">Settings</button></div></div>
       <p id="control-message" role="status" hidden></p>
       <div id="dataset-grid" class="dataset-grid"></div>
     </section>
@@ -48,8 +63,44 @@
       </article>
     </section>
     <footer><span>Open Food Facts contributors · ODbL-1.0</span><span id="updated">—</span></footer>
+    </div>
     <noscript>JavaScript is required for the dashboard. / Für die Oberfläche ist JavaScript erforderlich.</noscript>
   </main>
+  <dialog id="access-dialog" aria-labelledby="access-title">
+    <form id="access-form" class="dialog-content">
+      <header class="dialog-header"><div><h2 id="access-title" data-i18n="access">Access &amp; API</h2><p data-i18n="accessHelp"></p></div><button type="button" class="dialog-close" data-close="access-dialog" aria-label="Close">×</button></header>
+      <div class="dialog-body">
+        <section class="setting-group">
+          <label for="session-duration" data-i18n="sessionDuration"></label>
+          <select id="session-duration"><option value="30" data-i18n="session30"></option><option value="480" data-i18n="session480"></option><option value="0" data-i18n="sessionNever"></option><option value="custom" data-i18n="sessionCustom"></option></select>
+          <label for="idle-minutes" id="idle-label" data-i18n="idleMinutes" hidden></label><input type="number" id="idle-minutes" min="1" max="525600" step="1" hidden>
+          <p class="muted" data-i18n="sessionHelp"></p>
+          <button type="button" id="logout-all" class="secondary" data-i18n="logoutAll"></button>
+        </section>
+        <section class="setting-group">
+          <label class="check-row"><input type="checkbox" id="api-required"><span data-i18n="apiRequired"></span></label>
+          <p class="muted" data-i18n="apiPolicyHelp"></p>
+          <label class="check-row" id="public-api-consent" hidden><input type="checkbox" id="confirm-public-api"><span data-i18n="publicApiConsent"></span></label>
+        </section>
+        <section class="setting-group">
+          <label for="api-key" data-i18n="apiKey"></label>
+          <div class="secret-field"><input id="api-key" type="password" autocomplete="off" spellcheck="false" minlength="24" maxlength="256"><button type="button" id="api-eye" class="secondary eye-button" aria-label="Show API key"></button><button type="button" id="api-copy" class="secondary" data-i18n="copy"></button></div>
+          <p class="muted" data-i18n="keyHelp"></p>
+          <button type="button" id="api-generate" class="secondary" data-i18n="generate"></button>
+          <label class="check-row" id="key-change-consent" hidden><input type="checkbox" id="confirm-key-change"><span data-i18n="keyChangeConsent"></span></label>
+        </section>
+        <section class="setting-group">
+          <h3 data-i18n="changePassword"></h3>
+          <label for="current-password" data-i18n="currentPassword"></label><input type="password" id="current-password" autocomplete="current-password" maxlength="256">
+          <label for="new-password" data-i18n="newPassword"></label><input type="password" id="new-password" autocomplete="new-password" minlength="12" maxlength="256">
+          <label for="repeat-password" data-i18n="repeatPassword"></label><input type="password" id="repeat-password" autocomplete="new-password" minlength="12" maxlength="256">
+          <p class="muted" data-i18n="passwordHelp"></p><button type="button" id="password-save" class="secondary" data-i18n="changePassword"></button>
+        </section>
+        <p id="access-message" role="status" hidden></p>
+      </div>
+      <footer class="dialog-footer control-actions"><button type="button" class="secondary" data-close="access-dialog" data-i18n="cancel">Cancel</button><button type="submit" id="access-save" class="primary" data-i18n="save">Save</button></footer>
+    </form>
+  </dialog>
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form" class="dialog-content">
       <header class="dialog-header"><div><h2 id="settings-title" data-i18n="settings">Settings</h2><p data-i18n="settingsIntro"></p></div><button type="button" class="dialog-close" data-close="settings-dialog" aria-label="Close">×</button></header>

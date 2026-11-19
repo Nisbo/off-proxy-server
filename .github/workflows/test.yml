@@ -21,7 +21,7 @@ jobs:
       - name: Unit, local HTTP and management tests
         run: python -m pytest -q
       - name: Real MongoDB integration tests
-        run: python -m pytest -q test_app.py
+        run: python -m pytest -q test_app.py test_security.py
         env:
           MONGO_TEST_URI: mongodb://127.0.0.1:27017/
       - name: Shell and Compose validation
