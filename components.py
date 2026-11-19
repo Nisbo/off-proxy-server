@@ -23,7 +23,7 @@ def snapshot(db):
     }
 
 
-def request(db, action):
+def request(db, action, *, reinstall=False):
     if action not in ('check', 'update'):
         raise ValueError('Unsupported component action')
     state = snapshot(db)
@@ -31,6 +31,10 @@ def request(db, action):
         raise security.Denied('component_agent_unavailable', 503)
     if action == 'update' and db.scheduler.find_one({'_id': 'sync', 'phase': 'running'}):
         raise security.Denied('component_import_active', 409)
+    all_current = all(any(row.get('name') == name and row.get('state') == 'current'
+                          for row in (state.get('rows') or [])) for name in ('python', 'gunicorn', 'mongo'))
+    if action == 'update' and not reinstall and state['status'] not in ACTIVE and all_current:
+        raise security.Denied('components_already_current', 409)
     db.components.update_one({'_id': 'host'}, {'$setOnInsert': {'status': 'idle'}}, upsert=True)
     result = db.components.update_one({'_id': 'host', 'status': {'$nin': ACTIVE}},
         {'$set': {'status': 'pending', 'action': action, 'job': secrets.token_hex(16),

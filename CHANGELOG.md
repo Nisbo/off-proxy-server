@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.13
+
+- EN: Disable normal component updates when all three components are current;
+  enforce the same rule in the API. Offer a separate, explicitly confirmed
+  reinstallation without resetting data, settings or credentials.
+- EN: Show version arrows only for known, different versions. Keep import,
+  offline, duplicate-request and authentication protections for both actions.
+- DE: Normale Komponenten-Updates bei drei aktuellen Komponenten deaktiviert
+  und zusätzlich in der API gesperrt. Erneute Installation separat und mit
+  eigener Bestätigung anbieten; Daten und Zugangsdaten bleiben erhalten.
+- DE: Versionspfeile nur bei bekannten, unterschiedlichen Versionen anzeigen.
+  Import-, Offline-, Mehrfachklick- und Anmeldeschutz für beide Aktionen erhalten.
+
 ## 0.1.12
 
 - EN: Repair the upgrade from old fixed-file-list updaters with the bootstrap

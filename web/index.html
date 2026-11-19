@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.12">
-  <script defer src="/assets/dashboard.js?v=0.1.12"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.13">
+  <script defer src="/assets/dashboard.js?v=0.1.13"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.12</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.13</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -150,6 +150,7 @@
         <p id="components-agent" class="error-message" hidden data-i18n="component_agent_unavailable">The host service is unavailable. Install it with off-proxy host-agent install.</p>
         <div id="components-rows" class="components-rows"></div>
         <p class="muted" id="components-checked"></p>
+        <section class="components-maintenance"><button class="secondary" id="components-reinstall" type="button" data-i18n="componentsReinstall">Reinstall components…</button><p class="muted" data-i18n="componentsReinstallHelp"></p></section>
         <p id="components-error" class="error-message" role="status" hidden></p>
       </div>
       <footer class="dialog-footer control-actions"><button class="secondary" id="components-check" type="button" data-i18n="componentsCheck">Check for updates</button><button class="primary" id="components-update" type="button" data-i18n="componentsUpdate">Update components…</button></footer>
@@ -157,9 +158,9 @@
   </dialog>
   <dialog id="components-confirm" class="control-dialog" aria-labelledby="components-confirm-title">
     <div class="dialog-content">
-      <header class="dialog-header"><h2 id="components-confirm-title" data-i18n="componentsConfirmTitle">Confirm component update</h2><button class="secondary dialog-close" type="button" data-close="components-confirm" aria-label="Close">×</button></header>
-      <div class="dialog-body"><p data-i18n="componentsConfirmText">Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.</p><p class="muted" data-i18n="componentsScope">Host Debian, Docker, reverse proxy and application code are not updated by this action.</p></div>
-      <footer class="dialog-footer control-actions"><button class="secondary" type="button" data-close="components-confirm" data-i18n="cancel">Cancel</button><button class="primary" id="components-start" type="button" data-i18n="componentsStart">Start update now</button></footer>
+      <header class="dialog-header"><h2 id="components-confirm-title">Confirm component update</h2><button class="secondary dialog-close" type="button" data-close="components-confirm" aria-label="Close">×</button></header>
+      <div class="dialog-body"><p id="components-confirm-text">Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.</p><p class="muted" data-i18n="componentsScope">Host Debian, Docker, reverse proxy and application code are not updated by this action.</p></div>
+      <footer class="dialog-footer control-actions"><button class="secondary" type="button" data-close="components-confirm" data-i18n="cancel">Cancel</button><button class="primary" id="components-start" type="button">Start update now</button></footer>
     </div>
   </dialog>
 </body>

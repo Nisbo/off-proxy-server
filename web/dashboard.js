@@ -118,6 +118,10 @@
     componentsHelp: "Nothing is checked or installed automatically. A check only looks for compatible component updates.",
     componentsCheck: "Check for updates", componentsUpdate: "Update components…", componentsStart: "Start update now",
     componentsConfirmTitle: "Confirm component update",
+    componentsReinstall: "Reinstall components…", componentsReinstallTitle: "Confirm component reinstallation",
+    componentsReinstallStart: "Reinstall now", componentsReinstallHelp: "Rebuild and restart the components even when everything is up to date.",
+    componentsReinstallText: "Rebuild Python/Linux, Gunicorn 27.x and MongoDB 8.0.x using the currently available compatible components. Services restart briefly. Data, settings and keys are retained. No full import is requested.",
+    components_already_current: "All components are up to date. No update is needed.",
     componentsConfirmText: "Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.",
     componentsScope: "Host Debian, Docker, your reverse proxy and application code are not updated by this action.",
     component_agent_unavailable: "The host service is unavailable. In the server terminal, run: off-proxy host-agent install",
@@ -138,6 +142,10 @@
     componentsHelp: "Es wird nichts automatisch geprüft oder installiert. Eine Prüfung sucht nur nach passenden Komponenten-Updates.",
     componentsCheck: "Nach Updates suchen", componentsUpdate: "Komponenten aktualisieren …", componentsStart: "Update jetzt starten",
     componentsConfirmTitle: "Komponenten-Update bestätigen",
+    componentsReinstall: "Komponenten erneut installieren …", componentsReinstallTitle: "Erneute Komponenteninstallation bestätigen",
+    componentsReinstallStart: "Jetzt erneut installieren", componentsReinstallHelp: "Komponenten erneut aufbauen und neu starten, auch wenn alles aktuell ist.",
+    componentsReinstallText: "Python-/Linux-Basis, Gunicorn 27.x und MongoDB 8.0.x mit den derzeit verfügbaren passenden Komponenten erneut aufbauen. Die Dienste werden kurz neu gestartet. Daten, Einstellungen und Schlüssel bleiben erhalten. Es wird kein Vollimport angefordert.",
+    components_already_current: "Alle Komponenten sind aktuell. Es ist kein Update nötig.",
     componentsConfirmText: "Python-/Linux-Basis, Gunicorn 27.x und MongoDB 8.0.x erneuern. Die Dienste werden kurz neu gestartet. Daten, Einstellungen und Schlüssel bleiben erhalten. Es wird kein Vollimport angefordert.",
     componentsScope: "Debian und Docker auf dem Host, ein eigener Reverse Proxy und unser Programmcode werden dabei nicht aktualisiert.",
     component_agent_unavailable: "Der Host-Dienst ist nicht erreichbar. Im Server-Terminal ausführen: off-proxy host-agent install",
@@ -153,13 +161,20 @@
     componentPreparing: "Update wird vorbereitet …", componentDownloading: "Komponenten-Images werden geladen …", componentBuilding: "Neues Image wird gebaut …",
     componentRestarting: "Dienste werden neu gestartet. Die Verbindung kann kurz unterbrochen sein …", componentVerifying: "API wird nach dem Neustart geprüft …"
   });
-  let componentState = null;
+  let componentState = null, componentReinstall = false;
   function renderComponents() {
     const state = componentState || {}, busy = ["pending", "running"].includes(state.status);
     $("components").disabled = !connected;
     $("components-agent").hidden = !!state.agent_available;
     $("components-check").disabled = !connected || !state.agent_available || busy || controlBusy;
-    $("components-update").disabled = $("components-check").disabled || snapshot?.scheduler?.phase === "running";
+    const operationDisabled = $("components-check").disabled || snapshot?.scheduler?.phase === "running";
+    const allCurrent = ["python", "gunicorn", "mongo"].every(name => (state.rows || []).find(row => row.name === name)?.state === "current");
+    $("components-update").disabled = operationDisabled || allCurrent;
+    $("components-update").title = allCurrent ? t("components_already_current") : "";
+    $("components-reinstall").disabled = operationDisabled;
+    setText("components-confirm-title", t(componentReinstall ? "componentsReinstallTitle" : "componentsConfirmTitle"));
+    setText("components-confirm-text", t(componentReinstall ? "componentsReinstallText" : "componentsConfirmText"));
+    setText("components-start", t(componentReinstall ? "componentsReinstallStart" : "componentsStart"));
     const phases = {preparing:"componentPreparing",downloading:"componentDownloading",building:"componentBuilding",restarting:"componentRestarting",verifying:"componentVerifying"};
     const message = state.status === "pending" ? "componentPending" : state.status === "running" ? (state.action === "check" ? "componentChecking" : phases[state.phase] || "componentPreparing") : state.result === "interrupted" ? "componentInterrupted" : state.result === "expired" ? "componentExpired" : state.status === "success" ? "componentSuccess" : state.status === "failed" ? "componentFailed" : state.status === "deferred" ? "componentDeferred" : "componentIdle";
     setText("components-state", t(message));
@@ -168,9 +183,9 @@
     for (const name of ["python","gunicorn","mongo"]) {
       let item = document.getElementById(`component-${name}`);
       if (!item) { item = document.createElement("article"); item.id = `component-${name}`; item.className="component-row"; item.innerHTML='<h3></h3><p class="muted"></p><span class="badge neutral"></span>'; grid.append(item); }
-      const row = (state.rows || []).find(r=>r.name===name) || {}, installed = state.installed?.[name]?.version || row.installed || "—";
+      const row = (state.rows || []).find(r=>r.name===name) || {}, installedVersion = state.installed?.[name]?.version || row.installed, installed = installedVersion || "—";
       item.querySelector("h3").textContent = t({python:"componentPython",gunicorn:"componentGunicorn",mongo:"componentMongo"}[name]);
-      item.querySelector("p").textContent = `${t("componentInstalled")}: ${installed}${name === "gunicorn" && row.available ? ` → ${row.available}` : ""}`;
+      item.querySelector("p").textContent = `${t("componentInstalled")}: ${installed}${name === "gunicorn" && installedVersion && row.available && row.available !== installedVersion ? ` → ${row.available}` : ""}`;
       badge(item.querySelector("span"), t(row.state === "available" ? "componentAvailable" : row.state === "current" ? "componentCurrent" : "componentUnknown"), row.state === "current" ? "good" : row.state === "available" ? "busy" : "neutral");
     }
   }
@@ -483,11 +498,15 @@
     finally { controlBusy=false; renderComponents(); }
   }
   $("components-check").addEventListener("click", () => componentAction("/ui/components/check",{}));
-  $("components-update").addEventListener("click", () => $("components-confirm").showModal());
+  for (const [id, reinstall] of [["components-update", false], ["components-reinstall", true]]) {
+    $(id).addEventListener("click", () => {
+      componentReinstall = reinstall; renderComponents(); $("components-confirm").showModal();
+    });
+  }
   $("components-start").addEventListener("click", async () => {
     $("components-start").disabled=true;
     $("components-confirm").close();
-    await componentAction("/ui/components/update",{confirmed:true});
+    await componentAction("/ui/components/update", componentReinstall ? {confirmed:true,reinstall:true} : {confirmed:true});
     $("components-start").disabled=false;
   });
   $("sync").addEventListener("click", async () => {

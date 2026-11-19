@@ -82,3 +82,31 @@ def test_update_checks_only_contact_fixed_https_sources(url):
 
 def test_update_sources_may_not_redirect_credentials():
     with pytest.raises(ValueError): components.NoRedirect().redirect_request(None,None,302,None,None,'https://evil.invalid')
+
+
+def test_current_components_require_explicit_reinstall_confirmation(secured):
+    server, client=secured
+    components.heartbeat(server.db)
+    server.db.components.update_one({'_id':'host'},{'$set':{
+        'rows':[{'name':name,'state':'current'} for name in ('python','gunicorn','mongo')]}})
+    assert client.login()[0]==200
+    result=client.call('/ui/components/update',{'confirmed':True})
+    assert result[0]==409 and result[1]['error']=='components_already_current'
+    assert server.db.components.find_one({'_id':'host'})['status']=='idle'
+    for invalid in (False,1,'true',None):
+        assert client.call('/ui/components/update',{'confirmed':True,'reinstall':invalid})[0]==400
+    assert client.call('/ui/components/update',{'confirmed':True,'reinstall':True},
+                       headers={'X-Off-Proxy-Control':'invalid'})[0]==403
+    assert client.call('/ui/components/update',{'confirmed':True,'reinstall':True})[1]['queued'] is True
+    assert client.call('/ui/components/update',{'confirmed':True,'reinstall':True})[1]['queued'] is False
+    assert components.claim(server.db)=='update'
+    assert components.claim(server.db)==''
+
+
+@pytest.mark.parametrize('states',[
+    ['current','current','unknown'],['current','available','current'],['current','current']])
+def test_partial_or_unknown_checks_do_not_mean_everything_is_current(db,states):
+    components.heartbeat(db)
+    db.components.update_one({'_id':'host'},{'$set':{
+        'rows':[{'name':name,'state':state} for name,state in zip(('python','gunicorn','mongo'),states)]}})
+    assert components.request(db,'update')

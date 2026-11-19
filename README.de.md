@@ -162,6 +162,15 @@ die genaue neue Python-Version steht erst nach der Installation fest. Die
 Programmversion bleibt im Seitenkopf sichtbar; neuer Programmcode wird hier weder
 geprüft noch installiert.
 
+Wenn alle drei Komponenten als aktuell geprüft sind, ist **Komponenten
+aktualisieren …** deaktiviert; auch die API lehnt dann ein normales Update ab.
+Unbekannte oder unvollständige Prüfungen gelten nicht als aktuell. **Komponenten
+erneut installieren …** steht separat mit eigener ausdrücklicher Bestätigung
+bereit und baut die Komponenten auch ohne verfügbares Update neu auf. Daten,
+Einstellungen und Schlüssel bleiben erhalten. Ein Versionspfeil erscheint nur
+zwischen zwei bekannten, unterschiedlichen Gunicorn-Versionen. Der Shell-Befehl
+`off-proxy components-update` bleibt ein ausdrücklich erzwungener Neuaufbau.
+
 **Komponenten aktualisieren …** verlangt eine zusätzliche ausdrückliche Bestätigung.
 Download, Build, Neustart und Prüfung werden angezeigt. Die geöffnete Seite verbindet
 sich nach dem kurzen Neustart wieder; die bestehende Anmeldung bleibt erhalten.

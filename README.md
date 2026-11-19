@@ -150,6 +150,14 @@ reported as an image update; its exact new Python version is known after install
 The application version remains visible in the page header; this action does not
 check for or install new application code.
 
+When all three components were checked as current, **Update components…** is
+disabled; the API also rejects a normal update in this state. Unknown/incomplete
+checks do not count as current. **Reinstall components…** is offered separately
+with its own explicit confirmation to rebuild and restart even without an update.
+Data, settings and keys are retained. A version arrow appears only between two
+known, different Gunicorn versions. The shell command `off-proxy components-update`
+remains an explicit forced rebuild.
+
 **Update components…** requires another explicit confirmation. It shows download,
 build, restart and verification stages. An open page reconnects after the short
 restart; the existing login session survives. Imports defer updates; interrupted,

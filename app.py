@@ -31,7 +31,7 @@ import control
 import security
 import components
 
-VERSION = "0.1.12"
+VERSION = "0.1.13"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -720,9 +720,12 @@ class Request:
                 self.send_json(200, self.server.security.save(values))
             elif path in ("/ui/components/check", "/ui/components/update"):
                 action = "check" if path.endswith("/check") else "update"
-                if (action == "check" and values) or (action == "update" and (set(values) != {"confirmed"} or values["confirmed"] is not True)):
+                invalid_update = action == "update" and (
+                    set(values) - {"confirmed", "reinstall"} or values.get("confirmed") is not True
+                    or ("reinstall" in values and values["reinstall"] is not True))
+                if (action == "check" and values) or invalid_update:
                     raise ValueError("Explicit confirmation required")
-                self.send_json(202, {"queued": components.request(self.server.db, action)})
+                self.send_json(202, {"queued": components.request(self.server.db, action, reinstall=values.get("reinstall", False))})
             elif path == "/ui/settings":
                 self.send_json(200, {"settings": control.save_settings(self.server.db, values)})
             elif path == "/ui/sync" and not values:
