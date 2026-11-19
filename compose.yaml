@@ -1,6 +1,6 @@
 name: off-proxy-server
 x-app: &app
-  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.11}
+  image: off-proxy-server:${OFF_PROXY_IMAGE_TAG:-0.1.12}
   build:
     context: ${OFF_PROXY_SOURCE_DIR:-.}
     args:

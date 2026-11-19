@@ -57,7 +57,11 @@ if 'exec' in a and any('result=db.scheduler.update_one' in x for x in a) and os.
 if 'exec' in a and any('busy=' in x for x in a):sys.exit(75 if os.environ.get('FAKE_BUSY')=='1' else 0)
 if 'exec' in a and any('sys.argv[1]' in x for x in a):
     sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source or (os.environ.get('FAKE_COMPONENT_FAIL')=='1' and 'components-' in os.environ.get('OFF_PROXY_IMAGE_TAG','')) else 0)
-if 'build' in a and os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
+if 'build' in a:
+    directory=pathlib.Path(source).parent
+    if 'components.py' in (directory/'Dockerfile').read_text() and not (directory/'components.py').is_file():
+        print('components.py: not found',file=sys.stderr);sys.exit(1)
+    if os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
 if a[-2:]==['app.py','password']:
     data=sys.stdin.readline()
     pathlib.Path(os.environ['FAKE_LOG']+'.password-length').write_text(str(len(data.rstrip('\\n'))))
@@ -73,7 +77,7 @@ sys.exit(0)
 
     def archive(release):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "dashboard.py", "control.py", "security.py", "components.py", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
+            for name in ("app.py", "dashboard.py", "control.py", "security.py", "components.py", "runtime-files.txt", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
                 data = (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)
@@ -431,3 +435,51 @@ def test_installer_sets_up_request_only_systemd_host_agent(installation):
     assert not list(service_dir.glob('*.timer'))
     assert 'enable ' in Path(str(log)+'.systemd').read_text()
     assert 'restart ' in Path(str(log)+'.systemd').read_text()
+
+
+def historical_updater(tmp_path):
+    result=subprocess.run(['git','show','e17b3d613c415385bc64e0270fabe335c57fea86:off-proxy'],
+                          cwd=SOURCE,capture_output=True,text=True)
+    if result.returncode:
+        pytest.skip('Historical updater requires repository history (CI fetch-depth: 0)')
+    path=tmp_path/'off-proxy-0.1.10'
+    path.write_text(result.stdout)
+    return path
+
+
+def test_actual_010_updater_failure_is_repaired_by_bootstrap(installation):
+    root, env, log, run=installation
+    assert run('install').returncode == 0
+    before=(root/'.env').read_bytes()
+    old=historical_updater(root.parent)
+    result=subprocess.run(['bash',str(old),'update'],env=dict(env,FAKE_RELEASE='b'*40),capture_output=True,text=True)
+    assert result.returncode != 0
+    assert 'components.py' in result.stderr
+    incomplete=root/'releases'/('b'*40)
+    assert incomplete.is_dir() and not (incomplete/'components.py').exists()
+    assert (root/'.state/current').read_text().strip() == 'a'*40
+    assert (root/'.env').read_bytes()==before
+    result=subprocess.run(['bash',str(SOURCE/'install.sh')],env=dict(env,FAKE_RELEASE='b'*40),capture_output=True,text=True)
+    assert result.returncode == 0, result.stdout+result.stderr
+    assert (incomplete/'components.py').is_file()
+    assert (incomplete/'runtime-files.txt').is_file()
+    assert (root/'.state/current').read_text().strip() == 'b'*40
+    assert (root/'.env').read_bytes()==before
+    assert run('update', FAKE_RELEASE='b'*40).returncode == 0
+
+
+def test_manifest_transports_future_modules_without_updater_changes(installation):
+    root, env, log, run=installation
+    assert run('install').returncode == 0
+    archive=Path(env['FAKE_REMOTE'])/('b'*40+'.tar.gz')
+    with tarfile.open(archive,'r:gz') as source:
+        files={m.name:source.extractfile(m).read() for m in source if m.isfile()}
+    prefix='off-proxy-server-'+('b'*40)+'/'
+    files[prefix+'runtime-files.txt']+=b'future_runtime.py\n'
+    files[prefix+'future_runtime.py']=b'"""Future runtime module."""\n'
+    with tarfile.open(archive,'w:gz') as target:
+        for name,body in files.items():
+            entry=tarfile.TarInfo(name);entry.size=len(body);entry.mode=0o644
+            target.addfile(entry,io.BytesIO(body))
+    assert run('update',FAKE_RELEASE='b'*40).returncode == 0
+    assert (root/'releases'/('b'*40)/'future_runtime.py').is_file()

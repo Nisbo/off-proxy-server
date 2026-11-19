@@ -114,6 +114,32 @@ db.scheduler.update_one({"_id":"sync"},{"$unset":{"maintenance_until":""}})' >/d
   MAINTENANCE_SOURCE=
 }
 
+validate_runtime_list() {
+  local source=$1 name count=0
+  [[ -f $source/runtime-files.txt ]] || return 1
+  while IFS= read -r name || [[ -n $name ]]; do
+    case "$name" in
+      test*|*/*|*..*|'') return 1 ;;
+      *.py) [[ $name =~ ^[a-z][a-z0-9_]*\.py$ ]] || return 1 ;;
+      VERSION|compose.yaml|Dockerfile|.dockerignore|requirements.txt|off-proxy|runtime-files.txt) ;;
+      *) return 1 ;;
+    esac
+    [[ -f $source/$name && ! -L $source/$name ]] || return 1
+    count=$((count+1))
+  done < "$source/runtime-files.txt"
+  (( count > 0 ))
+}
+runtime_complete() {
+  local source=$1 name
+  validate_runtime_list "$source" || return 1
+  for name in app.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy runtime-files.txt; do
+    [[ -f $source/$name ]] || return 1
+  done
+  for name in index.html dashboard.js dashboard.css; do
+    [[ -f $source/web/$name ]] || return 1
+  done
+}
+
 fetch_release() {
   TEMP=$(mktemp -d "$ROOT/.stage.XXXXXX")
   if [[ -n ${1:-} ]]; then
@@ -124,7 +150,7 @@ fetch_release() {
   RELEASE=$(sed -nE '/^[[:space:]]*"sha":/ {s/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/;p;q;}' "$TEMP/commit.json")
   fi
   [[ $RELEASE =~ ^[a-f0-9]{40}$ ]] || die 'GitHub did not return a valid commit.'
-  if [[ ! -d $ROOT/releases/$RELEASE ]]; then
+  if ! runtime_complete "$ROOT/releases/$RELEASE"; then
     curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 180 \
       "https://codeload.github.com/Nisbo/off-proxy-server/tar.gz/$RELEASE" -o "$TEMP/source.tar.gz"
     mkdir "$TEMP/source"
@@ -133,16 +159,20 @@ fetch_release() {
     version_for "$TEMP/source" >/dev/null
     mkdir "$TEMP/runtime"
     local name
-    for name in app.py dashboard.py control.py security.py components.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy; do
-      [[ -f $TEMP/source/$name ]] || die "Incomplete source archive: $name"
+    runtime_complete "$TEMP/source" || die 'Incomplete or invalid source archive. Existing services unchanged.'
+    while IFS= read -r name || [[ -n $name ]]; do
       cp -p "$TEMP/source/$name" "$TEMP/runtime/$name"
       # Extraction uses umask 077; public code must remain readable inside non-root images.
       chmod 644 "$TEMP/runtime/$name"
-    done
+    done < "$TEMP/source/runtime-files.txt"
     [[ -f $TEMP/source/web/index.html && -f $TEMP/source/web/dashboard.js && -f $TEMP/source/web/dashboard.css ]] || die 'Incomplete web assets.'
     cp -Rp "$TEMP/source/web" "$TEMP/runtime/web"
     chmod -R u=rwX,go=rX "$TEMP/runtime/web"
     [[ ! -f $TEMP/source/LICENSE ]] || cp -p "$TEMP/source/LICENSE" "$TEMP/runtime/LICENSE"
+    runtime_complete "$TEMP/runtime" || die 'Incomplete runtime manifest. Existing services unchanged.'
+    # Old updaters may have cached a release without newly introduced modules.
+    # Replace only code for this pinned commit, after the complete archive passed validation.
+    if [[ -d $ROOT/releases/$RELEASE ]]; then mv "$ROOT/releases/$RELEASE" "$TEMP/incomplete-runtime"; fi
     mv "$TEMP/runtime" "$ROOT/releases/$RELEASE"
   fi
   cleanup; TEMP=

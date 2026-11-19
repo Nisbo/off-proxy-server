@@ -1,0 +1,12 @@
+app.py
+dashboard.py
+control.py
+security.py
+components.py
+VERSION
+compose.yaml
+Dockerfile
+.dockerignore
+requirements.txt
+off-proxy
+runtime-files.txt

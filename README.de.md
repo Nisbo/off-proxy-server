@@ -95,6 +95,24 @@ sie nicht. Daten, Passwörter, API-Schlüssel, Bindings und Einstellungen bleibe
 Versionen vor 0.1.7 entfernt außerdem den GUI-Schutz und nutzt wieder den ursprünglichen
 API-Schlüssel aus `.env`.
 
+### Upgrade von 0.1.10 oder älter / fehlende Laufzeitdateien
+
+Alte Verwaltungsskripte kopieren eine feste Dateiliste. Beim Wechsel auf 0.1.11
+kann deshalb vor dem Neustart `components.py: not found` auftreten. Einmal den
+aktuellen Bootstrap-Installer statt des alten Updatebefehls verwenden:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
+```
+
+Er erkennt die vorhandene verwaltete Installation und behält Datenverzeichnis,
+Einstellungen, Passwort, Sitzungen, API-Schlüssel und Netzwerkbindung. Unvollständige
+Quell-Caches werden repariert. Bei einem eigenen Installationsverzeichnis stattdessen
+`bash -s -- /dein/installationsverzeichnis` verwenden. Danach funktionieren Updates
+wieder mit `off-proxy update`. Neue Laufzeitdateien stehen in `runtime-files.txt`
+statt in einer unveränderlichen Liste des installierten Updaters. Die Produktdatenbank
+wird vom Installer nicht gelöscht.
+
 ### Komponenten manuell aktualisieren
 
 Diese Version zuerst mit `off-proxy update` installieren, danach:

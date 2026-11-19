@@ -89,6 +89,23 @@ Existing data, passwords, API keys, bindings and settings are retained.
 **Rollback restores software, not a database backup.** Returning to versions before
 0.1.7 also removes GUI protection and uses the original `.env` API key again.
 
+### Upgrading from 0.1.10 or earlier / missing runtime files
+
+Old management scripts copy a fixed list of runtime files. When upgrading to
+0.1.11, this can fail with `components.py: not found` before services restart.
+Run the current bootstrap installer once instead of the old update command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
+```
+
+It detects the existing managed installation and preserves the data directory,
+settings, password, sessions, API key and network binding. It repairs incomplete
+cached source releases. For a custom installation directory, append its path to
+`bash -s -- /your/installation`. Subsequent updates use `off-proxy update` again.
+New runtime files are listed in `runtime-files.txt` rather than a frozen list in
+the installed updater. The installer never deletes the product database.
+
 ### Manual component updates
 
 After installing this version with `off-proxy update`, run:

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.12
+
+- EN: Repair the upgrade from old fixed-file-list updaters with the bootstrap
+  installer. Runtime files now follow a validated release manifest; incomplete
+  cached code releases are replaced only after complete source validation.
+- EN: Add regression coverage using the actual 0.1.10 updater, including the
+  failed build, retained running API/data/credentials, installer recovery and
+  a real Docker upgrade to Gunicorn with GUI component jobs.
+- DE: Upgrade von alten Updatern mit fester Dateiliste über den Bootstrap-Installer
+  repariert. Laufzeitdateien folgen einem geprüften Release-Manifest; unvollständige
+  Code-Caches werden erst nach vollständiger Quellprüfung ersetzt.
+- DE: Regressionstest mit echtem 0.1.10-Updater ergänzt: fehlgeschlagener Build,
+  erhaltene API/Daten/Zugangsdaten, Installer-Reparatur und echtes Docker-Upgrade.
+
 ## 0.1.11
 
 - EN: Replace Waitress with Gunicorn 27.x, one bounded threaded worker, no
