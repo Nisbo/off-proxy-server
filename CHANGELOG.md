@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- EN: Scope the lookup form grid to the lookup form. Redesign settings and full-import
+  confirmation dialogs with grouped fields, fixed action areas and a clear explanation
+  of the staged import. Unify button sizing and remove the read-only lookup badge.
+- DE: Suchformular-Layout auf die Suche begrenzen. Einstellungen und Vollimport-Abfrage
+  mit gruppierten Feldern, festen Aktionsbereichen und Erklärung des sicheren
+  Importablaufs überarbeiten. Buttongrößen vereinheitlichen, „Nur lesen“ entfernen.
+
 ## 0.1.5
 
 - EN: Refresh display and queue manual synchronization through the existing worker.

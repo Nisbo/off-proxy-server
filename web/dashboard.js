@@ -5,7 +5,7 @@
       eyebrow: "YOUR LOCAL PRODUCT MIRROR", warning: "Early development · Test use only. This dashboard has no login. The product API still requires its key.",
       records: "Published records", recordHint: "All available datasets · metadata count", storage: "MongoDB storage", storageHint: "Data + indexes, including ongoing imports",
       nextCheck: "Next synchronization", datasets: "Available datasets", live: "LIVE STATUS", activity: "Synchronization", transfer: "Download", datasetHeading: "Your datasets", refresh: "Refresh display",
-      lookupEyebrow: "LOCAL LOOKUP", lookup: "Find a product", lookupHint: "Search by EAN across all four datasets. Leading zeros are preserved. No data is changed.", readOnly: "Read only",
+      lookupEyebrow: "LOCAL LOOKUP", lookup: "Find a product", lookupHint: "Search by EAN across all four datasets. Leading zeros are preserved. No data is changed.",
       eanLabel: "EAN / barcode", scope: "Dataset", all: "All datasets", food: "Food", beauty: "Beauty", petfood: "Pet food", product: "Other products", search: "Search", brand: "Brand", quantity: "Package quantity",
       ready: "Ready", pending: "Pending", full_import: "Full import", delta_import: "Delta import", error: "Source error", connected: "Connected", disconnected: "Unavailable",
       fullAt: "Last full import", checkedAt: "Last delta check", sourceAt: "Source export", nextFull: "Full refresh due", noDate: "Not yet recorded", firstImport: "First import pending",
@@ -20,7 +20,7 @@
       eyebrow: "DEIN LOKALER PRODUKTBESTAND", warning: "Frühe Entwicklung · Nur zum Testen verwenden. Diese Oberfläche hat keine Anmeldung. Die Produkt-API benötigt weiterhin ihren Schlüssel.",
       records: "Veröffentlichte Datensätze", recordHint: "Alle verfügbaren Bestände · Metadatenzählung", storage: "MongoDB-Speicher", storageHint: "Daten + Indizes, inklusive laufender Importe",
       nextCheck: "Nächster Abgleich", datasets: "Verfügbare Bestände", live: "LIVE-STATUS", activity: "Synchronisierung", transfer: "Download", datasetHeading: "Deine Datenbestände", refresh: "Anzeige aktualisieren",
-      lookupEyebrow: "LOKALE ABFRAGE", lookup: "Produkt finden", lookupHint: "Per EAN in allen vier Beständen suchen. Führende Nullen bleiben erhalten. Es werden keine Daten verändert.", readOnly: "Nur lesen",
+      lookupEyebrow: "LOKALE ABFRAGE", lookup: "Produkt finden", lookupHint: "Per EAN in allen vier Beständen suchen. Führende Nullen bleiben erhalten. Es werden keine Daten verändert.",
       eanLabel: "EAN / Barcode", scope: "Datenbestand", all: "Alle Bestände", food: "Lebensmittel", beauty: "Kosmetik", petfood: "Tiernahrung", product: "Sonstige Produkte", search: "Suchen", brand: "Marke", quantity: "Packungsmenge",
       ready: "Bereit", pending: "Ausstehend", full_import: "Vollimport", delta_import: "Delta-Import", error: "Quellenfehler", connected: "Verbunden", disconnected: "Nicht erreichbar",
       fullAt: "Letzter Vollimport", checkedAt: "Letzte Delta-Prüfung", sourceAt: "Stand des Exports", nextFull: "Vollabgleich fällig", noDate: "Noch nicht erfasst", firstImport: "Erstimport ausstehend",
@@ -38,9 +38,15 @@
     gapHelp: "Existing products remain available. Continuing applies newer changes but cannot recover missing changes. A returning delta can close the gap; otherwise a full import is needed.",
     fullPolicy: "Full imports", fullConfirm: "Only after confirmation (default)", fullAutomatic: "Allow automatic full imports",
     fullInterval: "Regular full refresh interval in days (0 = disabled)",
-    fullHelp: "Regular full imports are disabled by default. They reconcile deletions not included in deltas. With confirmation enabled, a due date only shows a request; deltas continue. Initial imports also need confirmation.",
+    fullHelp: "0 disables regular full refreshes. An optional refresh reconciles deletions not included in deltas. With confirmation enabled, a due date is shown; it does not start an import.",
+    settingsIntro: "Choose how your product datasets stay up to date.", close: "Close",
+    policyHelp: "By default, every full import needs your confirmation, including the first import. Delta checks continue automatically. Automatic full imports require explicit consent.",
+    fullIntro: "Rebuild one dataset while keeping it available.",
+    importDownload: "Download and import", importDownloadHelp: "The download is decompressed as it arrives and written to a separate new dataset. The current dataset remains readable.",
+    importVerify: "Verify the complete import", importVerifyHelp: "The new dataset is published only after the download and all database writes succeed and integrity checks pass.",
+    importSwitch: "Switch, then remove the old dataset", importSwitchHelp: "The API switches to the new dataset first. Only then is the old copy removed. Other datasets remain unchanged.",
     autoConsent: "I allow full imports without asking for initial datasets, delta gaps and enabled intervals. They can take hours and temporarily require space for two copies.",
-    fullTitle: "Confirm full import", fullWarning: "Download and rebuild this entire dataset? This can take hours and temporarily needs space for both the old and new dataset. Existing products stay available. A failed or interrupted import needs a new confirmation.",
+    fullTitle: "Confirm full import", fullWarning: "This can take hours and temporarily needs space for both datasets. If the import fails before the switch, the old dataset is retained.",
     fullStart: "Start full import", fullButton: "Full import…", noFullSchedule: "Regular full refresh disabled",
     needs_full_import: "Approval needed", partial: "Delta gap", gap_paused: "Updates paused",
     gapWarning: "Missing coverage: {ranges}. Existing data remains available.", gapContinuing: "Available deltas continue to be applied.", gapIsPaused: "Newer deltas are paused for this dataset.",
@@ -55,9 +61,15 @@
     gapHelp: "Vorhandene Produkte bleiben abfragbar. Beim Fortsetzen werden neuere Änderungen übernommen; fehlende Änderungen bleiben offen. Eine wieder verfügbare Delta-Datei kann die Lücke schließen, andernfalls ist ein Vollimport nötig.",
     fullPolicy: "Vollimporte", fullConfirm: "Nur nach Bestätigung (Standard)", fullAutomatic: "Automatische Vollimporte erlauben",
     fullInterval: "Regelmäßiger Vollabgleich in Tagen (0 = deaktiviert)",
-    fullHelp: "Regelmäßige Vollimporte sind standardmäßig deaktiviert. Sie übernehmen Löschungen, die in Deltas fehlen. Bei Bestätigungspflicht wird ein fälliger Termin nur angezeigt; Deltas laufen weiter. Auch Erstimporte benötigen eine Bestätigung.",
+    fullHelp: "0 deaktiviert regelmäßige Vollabgleiche. Ein optionaler Vollabgleich übernimmt Löschungen, die in Deltas fehlen. Bei Bestätigungspflicht wird die Fälligkeit nur angezeigt; ein Import startet dadurch nicht.",
+    settingsIntro: "Lege fest, wie deine Produktbestände aktuell bleiben.", close: "Schließen",
+    policyHelp: "Standardmäßig benötigt jeder Vollimport deine Bestätigung, auch der Erstimport. Delta-Prüfungen laufen automatisch weiter. Automatische Vollimporte erfordern eine ausdrückliche Zustimmung.",
+    fullIntro: "Einen Bestand neu aufbauen und weiter abfragen können.",
+    importDownload: "Herunterladen und importieren", importDownloadHelp: "Der Download wird laufend entpackt und in einen separaten neuen Bestand geschrieben. Der bisherige Bestand bleibt abfragbar.",
+    importVerify: "Vollständigen Import prüfen", importVerifyHelp: "Erst wenn Download und alle Datenbankzugriffe erfolgreich abgeschlossen sind und die Integritätsprüfungen bestehen, wird der neue Bestand freigegeben.",
+    importSwitch: "Umschalten, dann alten Bestand entfernen", importSwitchHelp: "Zuerst nutzt die API den neuen Bestand. Erst danach wird die alte Kopie entfernt. Die anderen Bestände bleiben unverändert.",
     autoConsent: "Ich erlaube Vollimporte ohne Rückfrage bei Erstimporten, Delta-Lücken und aktivierten Intervallen. Sie können Stunden dauern und vorübergehend Platz für zwei Bestände benötigen.",
-    fullTitle: "Vollimport bestätigen", fullWarning: "Diesen Bestand vollständig herunterladen und neu aufbauen? Das kann Stunden dauern und benötigt vorübergehend Platz für alten und neuen Bestand. Vorhandene Produkte bleiben abfragbar. Ein fehlgeschlagener oder unterbrochener Import benötigt eine neue Bestätigung.",
+    fullTitle: "Vollimport bestätigen", fullWarning: "Das kann Stunden dauern und benötigt vorübergehend Platz für beide Bestände. Scheitert der Import vor dem Umschalten, bleibt der alte Bestand erhalten.",
     fullStart: "Vollimport starten", fullButton: "Vollimport …", noFullSchedule: "Regelmäßiger Vollabgleich deaktiviert",
     needs_full_import: "Bestätigung erforderlich", partial: "Delta-Lücke", gap_paused: "Aktualisierung pausiert",
     gapWarning: "Fehlender Zeitraum: {ranges}. Vorhandene Daten bleiben verfügbar.", gapContinuing: "Verfügbare Deltas werden weiter eingespielt.", gapIsPaused: "Neuere Deltas sind für diesen Bestand pausiert.",
@@ -95,7 +107,7 @@
     card.className = "dataset-card"; card.dataset.kind = kind;
     card.innerHTML = `<div class="dataset-top"><span class="dataset-icon" aria-hidden="true">${["F", "B", "P", "O"][index]}</span><span id="${kind}-badge" class="badge neutral"></span></div><h3 data-i18n="${kind}"></h3><div class="dataset-count" id="${kind}-count">—</div><p class="dataset-subtitle" data-i18n="countHint"></p><dl><div><dt data-i18n="fullAt"></dt><dd id="${kind}-full">—</dd></div><div><dt data-i18n="checkedAt"></dt><dd id="${kind}-checked">—</dd></div><div><dt data-i18n="sourceAt"></dt><dd id="${kind}-source">—</dd></div><div><dt data-i18n="nextFull"></dt><dd id="${kind}-next">—</dd></div><div><dt data-i18n="noCode"></dt><dd id="${kind}-unindexed">—</dd></div></dl><p id="${kind}-error" class="dataset-error" hidden></p><p id="${kind}-gap" class="dataset-warning" hidden></p><p id="${kind}-required" class="dataset-warning" hidden></p><p id="${kind}-job" class="dataset-error" hidden></p><button type="button" class="secondary full-button" disabled data-kind="${kind}" id="${kind}-import" data-i18n="fullButton"></button>`;
     $("dataset-grid").append(card);
-    $(`${kind}-import`).addEventListener("click", () => { fullKind = kind; setText("full-dataset", t(kind)); $("full-dialog").showModal(); });
+    $(`${kind}-import`).addEventListener("click", () => { fullKind = kind; $("full-error").hidden = true; setText("full-dataset", t(kind)); $("full-dialog").showModal(); });
   }
 
   function updateCountdown() {
@@ -188,6 +200,7 @@
     document.documentElement.lang = language;
     $("language").value = language;
     for (const element of document.querySelectorAll("[data-i18n]")) element.textContent = t(element.dataset.i18n);
+    for (const button of document.querySelectorAll(".dialog-close")) button.setAttribute("aria-label", t("close"));
     renderStatus(); renderLookup();
     if (fullKind) setText("full-dataset", t(fullKind));
     if (!$("connection-error").hidden) setText("connection-error", t("connectionError"));
@@ -237,6 +250,7 @@
     const consent = $("full-policy").value === "automatic" && snapshot.settings.full_import_policy !== "automatic";
     $("auto-confirm-row").hidden = !consent; $("auto-confirm").required = consent;
   });
+  for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => $(button.dataset.close).close());
   $("settings-cancel").addEventListener("click", () => $("settings-dialog").close());
   $("settings-form").addEventListener("submit", async event => {
     event.preventDefault(); $("settings-save").disabled = true;
@@ -251,6 +265,7 @@
     const ok = await sendControl("/ui/full-import", {kind: fullKind, confirmed: true});
     $("full-start").disabled = false;
     if (ok) { $("full-dialog").close(); controlNotice = "fullQueued"; renderStatus(); }
+    else { setText("full-error", t("controlError")); $("full-error").hidden = false; }
   });
   $("refresh").addEventListener("click", pollStatus);
   $("product-image").addEventListener("error", () => { $("product-image").hidden = true; });

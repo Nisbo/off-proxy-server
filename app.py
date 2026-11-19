@@ -27,7 +27,7 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",

@@ -201,7 +201,7 @@ h3 {
   font-size:.85rem;
   line-height:1.6;
 }
-.badge,.local-badge {
+.badge {
   border:1px solid var(--line);
   border-radius:30px;
   padding:5px 10px;
@@ -238,7 +238,7 @@ h3 {
   border-color:#71413e;
   background:#3a2428;
 }
-.badge.neutral,.local-badge {
+.badge.neutral {
   color:var(--muted);
 }
 .dataset-heading {
@@ -248,8 +248,6 @@ h3 {
   background:#21303f;
   border:1px solid #3d5064;
   color:var(--text);
-  padding:9px 13px;
-  font-size:.8rem;
 }
 .dataset-grid {
   display:grid;
@@ -382,28 +380,25 @@ progress::-moz-progress-bar {
 .lookup-panel {
   margin-bottom:22px;
 }
-form {
+#lookup-form {
   display:grid;
   grid-template-columns:minmax(180px,1fr) minmax(140px,220px) auto;
   gap:14px;
   align-items:end;
   margin-top:20px;
 }
-form label {
+#lookup-form label {
   display:block;
   margin-bottom:7px;
   color:var(--muted);
   font-size:.8rem;
 }
-form select {
+#lookup-form select {
   width:100%;
 }
 .primary {
   background:var(--accent);
   color:#0c2b2b;
-  padding:13px 24px;
-  min-height:46px;
-  font-weight:700;
 }
 .product-result {
   display:flex;
@@ -539,7 +534,7 @@ footer {
   .section-heading h2 {
     font-size:1.07rem;
   }
-  .badge,.local-badge {
+  .badge {
     font-size:.67rem;
   }
   .dataset-grid {
@@ -561,11 +556,11 @@ footer {
   .dataset-count {
     font-size:1.8rem;
   }
-  form {
+  #lookup-form {
     grid-template-columns:1fr;
     gap:12px;
   }
-  .primary {
+  #lookup-button {
     width:100%;
   }
   .product-result {
@@ -591,19 +586,63 @@ footer {
   }
 }
 
-.control-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.dataset-heading { flex-wrap: wrap; gap: 16px; }
-.dataset-warning { color: #e9c58b; line-height: 1.6; overflow-wrap: anywhere; }
-#control-message { margin: 0 0 18px; line-height: 1.6; color: var(--muted); }
-.full-button { margin-top: 18px; }
-dialog { color: var(--text, #edf3fa); background: #192430; border: 1px solid #40566c; border-radius: 20px; width: min(620px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 28px; overflow-y: auto; }
-dialog::backdrop { background: rgb(0 0 0 / 65%); }
-dialog h2 { margin-bottom: 20px; }
-dialog p { line-height: 1.6; }
-dialog label { display: block; margin-top: 20px; margin-bottom: 8px; }
-dialog select, dialog input[type="number"] { width: 100%; }
-dialog .control-actions { margin-top: 24px; }
-dialog .check-row { display: flex; align-items: flex-start; gap: 12px; line-height: 1.5; }
-dialog .check-row input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 3px; }
-[hidden] { display: none !important; }
-@media (max-width: 600px) { dialog { padding: 20px; } .control-actions button { flex: 1 1 auto; } }
+.primary,.secondary {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px;
+  padding:11px 16px;
+  font-size:.9rem;
+  font-weight:600;
+  line-height:1.3;
+}
+.primary { border:1px solid var(--accent); }
+.control-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:stretch; }
+.dataset-heading { flex-wrap:wrap; gap:16px; }
+.dataset-warning { color:var(--warning); line-height:1.6; overflow-wrap:anywhere; }
+#control-message { margin:0 0 18px; line-height:1.6; color:var(--muted); }
+.full-button { margin-top:18px; }
+dialog {
+  color:var(--text);
+  background:var(--panel);
+  border:1px solid #40566c;
+  border-radius:20px;
+  width:min(660px,calc(100% - 32px));
+  max-height:calc(100dvh - 32px);
+  padding:0;
+  overflow:hidden;
+  box-shadow:0 24px 80px rgb(0 0 0 / 40%);
+}
+dialog::backdrop { background:rgb(0 0 0 / 70%); }
+.dialog-content { display:flex; flex-direction:column; max-height:calc(100dvh - 34px); margin:0; }
+.dialog-header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:24px; border-bottom:1px solid var(--line); flex-shrink:0; }
+.dialog-header h2 { font-size:1.3rem; margin:0; }
+.dialog-header p { margin:7px 0 0; color:var(--muted); font-size:.88rem; line-height:1.5; }
+.dialog-close { display:grid; place-items:center; flex-shrink:0; width:40px; height:40px; padding:0; color:var(--muted); background:transparent; border:1px solid var(--line); font-size:1.5rem; line-height:1; }
+.dialog-close:hover { color:var(--text); background:var(--panel-soft); }
+.dialog-body { min-height:0; padding:24px; overflow-y:auto; overscroll-behavior:contain; }
+.dialog-footer { flex-shrink:0; justify-content:flex-end; padding:18px 24px; margin:0; border-top:1px solid var(--line); }
+.setting-group { padding:18px; margin:0 0 16px; border:1px solid var(--line); border-radius:12px; background:#141e29; }
+.setting-group:last-of-type { margin-bottom:0; }
+.setting-group>label { display:block; margin:0 0 12px; color:var(--text); font-weight:600; font-size:.95rem; line-height:1.5; }
+.setting-group select,.setting-group input[type="number"] { width:100%; min-width:0; }
+.setting-group p { margin:12px 0 0; font-size:.88rem; line-height:1.6; }
+.setting-group .check-row { display:flex; align-items:flex-start; gap:12px; margin:16px 0 0; color:var(--warning); font-size:.88rem; font-weight:400; }
+.check-row input { width:20px; height:20px; flex:0 0 auto; margin-top:3px; accent-color:var(--accent); }
+.import-dataset { display:inline-block; padding:7px 12px; margin:0 0 20px; border:1px solid #36665f; border-radius:8px; color:var(--accent); background:#19332f; font-weight:600; }
+.import-steps { counter-reset:import-step; list-style:none; margin:0; padding:0; }
+.import-steps li { position:relative; padding:0 0 22px 44px; }
+.import-steps li::before { counter-increment:import-step; content:counter(import-step); position:absolute; top:0; left:0; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; color:var(--accent); background:#233b3b; font-size:.85rem; font-weight:700; }
+.import-steps strong { display:block; padding-top:3px; font-size:.95rem; }
+.import-steps p { margin:7px 0 0; color:var(--muted); line-height:1.6; font-size:.88rem; }
+.import-notice { display:flex; align-items:flex-start; gap:12px; padding:16px; background:#30291f; border:1px solid #705635; border-radius:12px; color:#f0cb92; }
+.import-notice span { display:grid; place-items:center; flex-shrink:0; width:24px; height:24px; border:1px solid currentColor; border-radius:50%; }
+.import-notice p { margin:0; font-size:.88rem; line-height:1.6; }
+[hidden] { display:none !important; }
+@media (max-width:600px) {
+  .dialog-header,.dialog-body { padding:18px; }
+  .dialog-footer { padding:16px 18px; }
+  .setting-group { padding:14px; }
+  .setting-group select { font-size:.88rem; padding-left:10px; padding-right:24px; }
+  .control-actions button { flex:1 1 auto; }
+}

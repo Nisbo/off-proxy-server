@@ -679,3 +679,20 @@ def test_interrupted_full_import_clears_busy_phase_for_new_confirmation(db):
     assert state['phase'] == 'error' and state['ready'] is True
     assert db.requests.find_one({'_id': 'full:food'})['status'] == 'failed'
     assert control.request(db, 'full:food') is True
+
+
+def test_full_import_keeps_old_products_readable_while_new_copy_is_written(db):
+    publish(db)
+    old = db.state.find_one({'_id': 'food'})['collection']
+    def import_new(response, collection, label, progress):
+        assert collection.name != old
+        assert db.state.find_one({'_id': 'food'})['collection'] == old
+        app.save_product(collection, product(version=20))
+        # Even after the new record is written, API reads still use the published copy.
+        assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == 10
+        assert old in db.list_collection_names()
+        return 1, 0
+    with patch.object(app, 'open_url', return_value=response(b'')), patch.object(app, 'import_stream', side_effect=import_new):
+        app.full_import(db, 'food')
+    assert app.lookup(db, '4062139025398', 'food', 'de')[1]['product']['last_modified_t'] == 20
+    assert old not in db.list_collection_names()
