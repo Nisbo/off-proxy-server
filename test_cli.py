@@ -275,6 +275,8 @@ def test_runtime_install_excludes_tests_and_development_files(installation):
     assert not (source/'requirements-dev.txt').exists()
     assert not (source/'.github').exists()
     assert (source/'security.py').is_file()
+    for module in ('app.py','security.py','control.py','dashboard.py'):
+        assert (source/module).stat().st_mode & 0o044 == 0o044
     assert (source/'web/index.html').stat().st_mode & 0o044 == 0o044
     assert (source/'web').stat().st_mode & 0o011 == 0o011
 

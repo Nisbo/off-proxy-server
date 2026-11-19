@@ -122,6 +122,8 @@ fetch_release() {
     for name in app.py dashboard.py control.py security.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy; do
       [[ -f $TEMP/source/$name ]] || die "Incomplete source archive: $name"
       cp -p "$TEMP/source/$name" "$TEMP/runtime/$name"
+      # Extraction uses umask 077; public code must remain readable inside non-root images.
+      chmod 644 "$TEMP/runtime/$name"
     done
     [[ -f $TEMP/source/web/index.html && -f $TEMP/source/web/dashboard.js && -f $TEMP/source/web/dashboard.css ]] || die 'Incomplete web assets.'
     cp -Rp "$TEMP/source/web" "$TEMP/runtime/web"
@@ -148,13 +150,14 @@ api_exec() {
 }
 
 wait_api() {
-  local source=$1 expected=$2 _attempt
+  local source=$1 expected=$2 _attempt last_error=
   for _attempt in {1..15}; do
-    if api_exec "$source" 'r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
+    if last_error=$(api_exec "$source" 'r=urllib.request.Request("http://127.0.0.1:8080/health",headers={"Authorization":"Bearer "+current_key()})
 with urllib.request.urlopen(r,timeout=5) as response:
-    sys.exit(0 if json.load(response)["version"]==sys.argv[1] else 1)' "$expected" >/dev/null 2>&1; then return 0; fi
+    sys.exit(0 if json.load(response)["version"]==sys.argv[1] else 1)' "$expected" 2>&1); then return 0; fi
     sleep 2
   done
+  [[ -z $last_error ]] || printf '%s\n' "$last_error" >&2
   return 1
 }
 

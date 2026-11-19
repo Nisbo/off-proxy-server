@@ -93,6 +93,11 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         assert client.call('/api/v3/product/0123456789012.json', key=rotated)[0] == 200
         manage('update')  # Same version: does not restart/import.
         assert (root/'.env').read_bytes() == initial_env
+    except Exception:
+        if (root/'.env').exists() and (root/'releases'/('a'*40)/'compose.yaml').exists():
+            diagnostic = compose('logs','--tail','80','api','sync')
+            print(diagnostic.stdout, diagnostic.stderr)
+        raise
     finally:
         if (root/'.env').exists() and (root/'releases'/('a'*40)/'compose.yaml').exists():
             compose('down')
