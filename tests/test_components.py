@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 import components
 import security
-from test_app import db
-from test_security import secured
+from .test_app import db
+from .test_security import secured
 
 
 def test_only_authenticated_confirmed_update_requests_can_be_queued(secured):

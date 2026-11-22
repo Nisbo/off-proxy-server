@@ -30,8 +30,9 @@ from dashboard import ASSETS, LOOKUP_FIELDS, WEB, Dashboard
 import control
 import security
 import components
+import releases
 
-VERSION = "0.1.18"
+VERSION = "0.1.19"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -753,6 +754,36 @@ class Request:
                 self.send_json(200, {"ok": True}, self.session_cookie())
             elif path == "/ui/security":
                 self.send_json(200, self.server.security.save(values))
+            elif path in ("/ui/program/check", "/ui/program/update"):
+                channel = values.get("channel")
+                if channel not in releases.CHANNELS:
+                    raise ValueError("Invalid release channel")
+                if path.endswith("/check"):
+                    if set(values) != {"channel"}:
+                        raise ValueError("Invalid check")
+                    try:
+                        release = releases.latest(channel)
+                    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                        raise security.Denied("program_check_failed", 502)
+                    can_install = releases.available(release, VERSION, os.environ.get("OFF_PROXY_PROGRAM_COMMIT"))
+                    if release:
+                        self.server.db.program_releases.replace_one({"_id": channel},
+                            {"_id": channel, "release": release, "checked_at": time.time()}, upsert=True)
+                    else:
+                        self.server.db.program_releases.delete_one({"_id": channel})
+                    self.send_json(200, {"release": release, "available": can_install, "installed": VERSION})
+                else:
+                    if set(values) != {"channel", "commit", "confirmed"} or values["confirmed"] is not True:
+                        raise ValueError("Program update requires confirmation")
+                    checked = self.server.db.program_releases.find_one({"_id": channel}) or {}
+                    target = checked.get("release")
+                    if (not target or target["commit"] != values["commit"]
+                            or time.time() - checked["checked_at"] >= 3600):
+                        raise security.Denied("program_release_changed", 409)
+                    if not releases.available(target, VERSION, os.environ.get("OFF_PROXY_PROGRAM_COMMIT")):
+                        raise security.Denied("program_already_current", 409)
+                    job_target = {key: target[key] for key in ("channel", "commit", "version")}
+                    self.send_json(202, {"queued": components.request(self.server.db, "program-update", target=job_target)})
             elif path in ("/ui/components/check", "/ui/components/update"):
                 action = "check" if path.endswith("/check") else "update"
                 invalid_update = action == "update" and (

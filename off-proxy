@@ -47,12 +47,13 @@ current_source() {
 version_for() {
   local version
   version=$(cat "$1/VERSION")
-  [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'Invalid source VERSION.'
+  [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die 'Invalid source VERSION.'
   printf '%s' "$version"
 }
 compose_images() {
   local source=$1 image_tag=$2 mongo_image=$3; shift 3
   OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
+  OFF_PROXY_PROGRAM_COMMIT=${source##*/} \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
       -p "$PROJECT" -f "$source/compose.yaml" "$@"
 }
@@ -141,12 +142,14 @@ runtime_complete() {
 }
 
 fetch_release() {
+  local branch=${2:-main}
+  [[ $branch == main || $branch == beta ]] || die 'Invalid update branch.'
   TEMP=$(mktemp -d "$ROOT/.stage.XXXXXX")
   if [[ -n ${1:-} ]]; then
     RELEASE=$1
   else
   curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 90 \
-    https://api.github.com/repos/Nisbo/off-proxy-server/commits/main -o "$TEMP/commit.json"
+    "https://api.github.com/repos/Nisbo/off-proxy-server/commits/$branch" -o "$TEMP/commit.json"
   RELEASE=$(sed -nE '/^[[:space:]]*"sha":/ {s/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/;p;q;}' "$TEMP/commit.json")
   fi
   [[ $RELEASE =~ ^[a-f0-9]{40}$ ]] || die 'GitHub did not return a valid commit.'
@@ -218,6 +221,7 @@ install_command() {
     mv "$ROOT/off-proxy.new" "$ROOT/off-proxy"
   fi
   [[ -f $ROOT/off-proxy ]] || die 'Management command missing.'
+  [[ ${2:-} != host ]] || return 0
   mkdir -p "$BIN_DIR"
   {
     printf '#!/usr/bin/env bash\nexport OFF_PROXY_DIR=%q\nexec %q "$@"\n' "$ROOT" "$ROOT/off-proxy"
@@ -227,23 +231,29 @@ install_command() {
 }
 
 activate() {
-  local next=$1 old=${2:-} source expected
+  local next=$1 old=${2:-} mode=${3:-} source expected
   source=$(source_for "$next")
   expected=$(version_for "$source")
   compose_at "$source" config --quiet
   [[ -z $old ]] || check_import_idle "$(source_for "$old")"
   # Build first so a failed download/build cannot stop the existing service.
+  if [[ $mode == host ]]; then component_phase downloading; fi
   docker pull python:3.13-slim
   local python_base
   python_base=$(docker image inspect --format '{{index .RepoDigests 0}}' python:3.13-slim)
   [[ $python_base =~ ^python@sha256:[a-f0-9]{64}$ ]] || die 'Cannot identify Python base image.'
+  if [[ $mode == host ]]; then component_phase building; fi
   PYTHON_IMAGE_OVERRIDE=$python_base compose_at "$source" build api
   if [[ -n $old ]]; then
     acquire_maintenance "$(source_for "$old")"
+    if [[ $mode == host ]]; then component_phase restarting; fi
     compose_at "$(source_for "$old")" stop sync
   fi
   local result=0
   compose_at "$source" up -d --no-build || result=$?
+  if [[ $mode == host ]]; then
+    compose_at "$source" exec -T sync python components.py phase verifying >/dev/null 2>&1 || true
+  fi
   if [[ $result != 0 ]] || ! wait_api "$source" "$expected"; then
     if [[ -n $old ]]; then
       printf 'Activation failed; restoring previous services.\n' >&2
@@ -257,9 +267,40 @@ activate() {
   release_maintenance
   [[ -z $old || $next == "$old" ]] || write_pointer previous "$old"
   write_pointer current "$next"
-  install_command "$source"
-  install_host_agent
+  install_command "$source" "$mode"
+  if [[ $mode != host ]]; then install_host_agent; fi
   printf 'OFF Proxy Server %s ready. Delta checks run in the background; confirm full imports in the dashboard.\n' "$expected"
+}
+
+resolve_program_release() {
+  # A one-off container also works when the installed stack is stopped.
+  compose_current run --rm --no-deps -T --entrypoint python api releases.py "$1"
+}
+
+update_program() {
+  local mode=$1 channel=${2:-} pinned=${3:-} expected=${4:-} old resolved commit version extra
+  lock_operation
+  old=$(cat "$ROOT/.state/current")
+  check_import_idle "$(source_for "$old")"
+  if [[ -n $channel ]]; then
+    if [[ $mode == host ]]; then component_phase downloading; fi
+    resolved=$(resolve_program_release "$channel")
+    read -r commit version extra <<< "$resolved"
+    [[ $commit =~ ^[a-f0-9]{40}$ && $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ && -z $extra ]] ||
+      die 'Invalid published release.'
+    if [[ $mode == host && ( $pinned != "$commit" || $expected != "$version" ) ]]; then
+      printf 'Published release changed; check for updates again.\n' >&2
+      return 76
+    fi
+    fetch_release "$commit"
+    [[ $(version_for "$(source_for "$RELEASE")") == "$version" ]] ||
+      die 'Release tag and packaged version differ. Existing services unchanged.'
+  else
+    fetch_release "" "$mode"
+  fi
+  if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
+  activate "$RELEASE" "$old" "$mode"
+  if [[ $mode != host ]]; then password_setup; fi
 }
 
 components_update() {
@@ -363,7 +404,7 @@ EOF
     printf 'Host agent could not start; use off-proxy host-agent install / Host-Dienst konnte nicht starten.\n' >&2
 }
 components_worker() {
-  local action pid result ready=0
+  local action job pid result exit_code channel commit version extra ready=0
   exec 8>"$ROOT/.state/agent.lock"
   flock -n 8 || die 'Host agent already running.'
   umask 077
@@ -374,14 +415,18 @@ components_worker() {
       component_inventory >/dev/null 2>&1 || true
       ready=1
     fi
-    action=$(component_exec claim) || { sleep 5; continue; }
+    job=$(component_exec claim) || { sleep 5; continue; }
+    read -r action channel commit version extra <<< "$job"
     case "$action" in
-      check|update)
+      check|update|program-update)
         (
           if [[ $action == check ]]; then
             component_inventory && component_exec check
-          else
+          elif [[ $action == update ]]; then
             "$ROOT/off-proxy" components-update && { component_exec check || true; }
+          else
+            [[ -z $extra ]] || exit 1
+            "$ROOT/off-proxy" program-release-install "$channel" "$commit" "$version"
           fi
         ) >"$ROOT/.state/components.log" 2>&1 &
         pid=$!
@@ -390,9 +435,13 @@ components_worker() {
           component_exec heartbeat >/dev/null 2>&1 || true
         done
         result=success
-        wait "$pid" || result=failed
+        exit_code=0
+        wait "$pid" || exit_code=$?
         # Only codes are displayed; raw logs may include operational details.
-        if [[ $result == failed ]]; then
+        if [[ $exit_code == 76 && $action == program-update ]]; then
+          result=release_changed
+        elif [[ $exit_code != 0 ]]; then
+          result=failed
           if grep -q 'Update deferred' "$ROOT/.state/components.log"; then result=deferred; fi
         fi
         until component_exec finish "$result"; do
@@ -401,6 +450,10 @@ components_worker() {
         done
         tail -c 1048576 "$ROOT/.state/components.log" > "$ROOT/.state/components.log.new"
         mv "$ROOT/.state/components.log.new" "$ROOT/.state/components.log"
+        if [[ $action == program-update && $result == success ]]; then
+          # Persist the result before replacing the process that reports it.
+          systemctl --no-block restart "$(agent_unit)" >/dev/null 2>&1 || true
+        fi
         ;;
       '') ;;
       *) die 'Invalid component job.' ;;
@@ -498,7 +551,7 @@ password_setup() {
 main() {
   local action=${1:-help} old next
   if [[ $action == help || $action == --help ]]; then
-    printf 'off-proxy install|update|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
+    printf 'off-proxy install|update [beta [--head]]|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
     return
   fi
   require_root; prerequisites
@@ -515,11 +568,15 @@ main() {
   load_state
   case "$action" in
     update)
-      lock_operation; old=$(cat "$ROOT/.state/current")
-      check_import_idle "$(source_for "$old")"
-      fetch_release
-      if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
-      activate "$RELEASE" "$old"; password_setup ;;
+      if [[ $# == 1 ]]; then update_program main
+      elif [[ $# == 2 && $2 == beta ]]; then update_program release beta
+      elif [[ $# == 3 && $2 == beta && $3 == --head ]]; then update_program beta
+      else die 'Usage: off-proxy update [beta [--head]]'
+      fi ;;
+    program-release-install)
+      [[ $# == 4 && ( $2 == stable || $2 == beta ) && $3 =~ ^[a-f0-9]{40}$ && $4 =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] ||
+        die 'Invalid program release request.'
+      update_program host "$2" "$3" "$4" ;;
     components-update) lock_operation; components_update ;;
     components-worker) components_worker ;;
     host-agent) [[ ${2:-} == install ]] || die 'Usage: off-proxy host-agent install'; install_host_agent ;;

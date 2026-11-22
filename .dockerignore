@@ -4,6 +4,7 @@
 !control.py
 !security.py
 !components.py
+!releases.py
 !Dockerfile
 !requirements.txt
 !web/

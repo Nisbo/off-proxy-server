@@ -13,10 +13,10 @@ import time
 
 import pytest
 
-from test_security import Client
+from .test_security import Client
 
 pytestmark = pytest.mark.skipif(os.environ.get('DOCKER_SMOKE') != '1', reason='explicit disposable Docker host required')
-SOURCE = Path(__file__).parent
+SOURCE = Path(__file__).resolve().parents[1]
 
 
 def test_real_install_update_rotation_and_rollback(tmp_path):
@@ -32,7 +32,7 @@ def test_real_install_update_rotation_and_rollback(tmp_path):
                     '--output='+str(remote/('a'*40+'.tar.gz')),baseline],cwd=SOURCE,check=True)
     for commit, target_version in [('b'*40, newer)]:
         with tarfile.open(remote/(commit+'.tar.gz'), 'w:gz') as archive:
-            for name in ('app.py','control.py','dashboard.py','security.py','components.py','runtime-files.txt','VERSION','compose.yaml','Dockerfile','.dockerignore','requirements.txt','off-proxy','web/index.html','web/dashboard.js','web/dashboard.css'):
+            for name in ('app.py','control.py','dashboard.py','security.py','components.py','releases.py','runtime-files.txt','VERSION','compose.yaml','Dockerfile','.dockerignore','requirements.txt','off-proxy','web/index.html','web/dashboard.js','web/dashboard.css'):
                 body = (SOURCE/name).read_bytes()
                 if name in ('app.py','VERSION'):
                     body = body.replace(version.encode(), target_version.encode())

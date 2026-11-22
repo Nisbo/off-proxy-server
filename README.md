@@ -70,6 +70,8 @@ the background and does not depend on the shell or browser remaining open.
 | `off-proxy test 4062139025398 all` | Query a product across all available datasets |
 | `off-proxy password` | Set/reset the GUI password and revoke all sessions |
 | `off-proxy update` | Download and activate the current `main` commit |
+| `off-proxy update beta` | Install the latest published beta release |
+| `off-proxy update beta --head` | Download and activate the current `beta` commit |
 | `off-proxy components-update` | Manually refresh container components without changing application code |
 | `off-proxy rollback` | Return to the previous locally retained software version |
 | `off-proxy stop` / `off-proxy start` | Stop/start this installation; retain data |
@@ -105,6 +107,24 @@ cached source releases. For a custom installation directory, append its path to
 `bash -s -- /your/installation`. Subsequent updates use `off-proxy update` again.
 New runtime files are listed in `runtime-files.txt` rather than a frozen list in
 the installed updater. The installer never deletes the product database.
+
+### Program releases in the dashboard
+
+Open **Components → Program updates**, choose **Stable** or **Beta** and select
+**Check for releases**. The dashboard checks published releases on GitHub and
+shows the version and release notes. Select **Install release …** and confirm to
+start the update. The host service rechecks the selected release before replacing
+the program. If the release has changed, run a new check before installing.
+
+The dashboard remembers the selected channel in this browser. The shell
+commands do not change it. The dashboard offers upgrades and same-version
+switches to a published commit. A downgrade uses the explicit shell commands
+or `off-proxy rollback` where applicable. Existing installations receive this feature with `off-proxy update`.
+
+Published stable releases use a tag such as `v0.2.0`. Beta releases use a
+prerelease tag such as `v0.2.0-beta.1`. The tagged source must contain that exact
+version in its `VERSION` file. If the selected channel has no published release,
+the dashboard shows that state.
 
 ### Manual component updates
 
@@ -308,7 +328,7 @@ This compatibility path is separate from the normal fresh installation.
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q tests
 ```
 
 Tests use generated fixtures, never real user product dumps. Set `MONGO_TEST_URI`

@@ -17,19 +17,19 @@ DIGEST = re.compile(r'^(?:python|mongo)@sha256:[a-f0-9]{64}$')
 
 def snapshot(db):
     state = db.components.find_one({'_id': 'host'}) or {}
-    return {key: state.get(key) for key in ('status', 'action', 'job', 'phase', 'checked_at', 'finished_at', 'result', 'rows', 'installed')} | {
+    return {key: state.get(key) for key in ('status', 'action', 'job', 'phase', 'checked_at', 'finished_at', 'result', 'rows', 'installed', 'target')} | {
         'agent_available': time.time() - state.get('heartbeat', 0) < 30,
         'agent_version': state.get('agent_version'),
     }
 
 
-def request(db, action, *, reinstall=False):
-    if action not in ('check', 'update'):
+def request(db, action, *, reinstall=False, target=None):
+    if action not in ('check', 'update', 'program-update'):
         raise ValueError('Unsupported component action')
     state = snapshot(db)
     if not state['agent_available']:
         raise security.Denied('component_agent_unavailable', 503)
-    if action == 'update' and db.scheduler.find_one({'_id': 'sync', 'phase': 'running'}):
+    if action in ('update', 'program-update') and db.scheduler.find_one({'_id': 'sync', 'phase': 'running'}):
         raise security.Denied('component_import_active', 409)
     all_current = all(any(row.get('name') == name and row.get('state') == 'current'
                           for row in (state.get('rows') or [])) for name in ('python', 'gunicorn', 'mongo'))
@@ -38,7 +38,7 @@ def request(db, action, *, reinstall=False):
     db.components.update_one({'_id': 'host'}, {'$setOnInsert': {'status': 'idle'}}, upsert=True)
     result = db.components.update_one({'_id': 'host', 'status': {'$nin': ACTIVE}},
         {'$set': {'status': 'pending', 'action': action, 'job': secrets.token_hex(16),
-                  'requested_at': time.time(), 'phase': 'pending', 'result': None}})
+                  'requested_at': time.time(), 'phase': 'pending', 'result': None, 'target': target}})
     return bool(result.modified_count)
 
 
@@ -52,9 +52,15 @@ def claim(db):
     now = time.time()
     db.components.update_one({'_id': 'host', 'status': 'pending', 'requested_at': {'$lt': now-300}},
                              {'$set': {'status': 'failed', 'result': 'expired', 'finished_at': now}})
-    state = db.components.find_one_and_update({'_id': 'host', 'status': 'pending', 'action': {'$in': ['check', 'update']}},
+    state = db.components.find_one_and_update({'_id': 'host', 'status': 'pending', 'action': {'$in': ['check', 'update', 'program-update']}},
         {'$set': {'status': 'running', 'phase': 'preparing'}}, return_document=ReturnDocument.AFTER)
-    return state['action'] if state else ''
+    if not state:
+        return ''
+    if state['action'] == 'program-update':
+        # The shell validates all three fields before using them.
+        target = state.get('target') or {}
+        return ' '.join(('program-update', target['channel'], target['commit'], target['version']))
+    return state['action']
 
 
 def inventory(db, base, mongo):
@@ -80,7 +86,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def open_https(request):
     parsed = urllib.parse.urlsplit(request.full_url)
-    if (parsed.scheme != 'https' or parsed.hostname not in ('pypi.org', 'auth.docker.io', 'registry-1.docker.io', 'hub.docker.com')
+    if (parsed.scheme != 'https' or parsed.hostname not in ('pypi.org', 'auth.docker.io', 'registry-1.docker.io', 'hub.docker.com', 'api.github.com')
             or parsed.username or parsed.password or parsed.port not in (None, 443)):
         raise ValueError('Unsupported update source')
     return urllib.request.build_opener(NoRedirect()).open(request, timeout=15)
@@ -175,7 +181,7 @@ def main():
         inventory(db, *sys.argv[2:])
     elif command == 'check':
         sys.exit(0 if check(db) else 1)
-    elif command == 'finish' and sys.argv[2] in ('success', 'failed', 'deferred'):
+    elif command == 'finish' and sys.argv[2] in ('success', 'failed', 'deferred', 'release_changed'):
         db.components.update_one({'_id': 'host', 'status': 'running'},
             {'$set': {'status': sys.argv[2], 'result': sys.argv[2], 'finished_at': time.time()}})
     elif command == 'phase' and sys.argv[2] in ('preparing', 'downloading', 'building', 'restarting', 'verifying'):

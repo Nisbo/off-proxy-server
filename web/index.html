@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.18">
-  <script defer src="/assets/dashboard.js?v=0.1.18"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.19">
+  <script defer src="/assets/dashboard.js?v=0.1.19"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.18</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.19</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -154,6 +154,20 @@
     <div class="dialog-content">
       <header class="dialog-header"><div><p class="eyebrow" data-i18n="manualOnly">MANUAL UPDATES ONLY</p><h2 id="components-title" data-i18n="componentsTitle">Program &amp; components</h2></div><button class="secondary dialog-close" type="button" data-close="components-dialog" aria-label="Close">×</button></header>
       <div class="dialog-body">
+        <section class="program-release" aria-labelledby="program-title">
+          <h3 id="program-title" data-i18n="programTitle">Program updates</h3>
+          <p class="muted" data-i18n="programHelp"></p>
+          <div class="program-controls">
+            <div><label for="program-channel" data-i18n="programChannel">Release channel</label><select id="program-channel"><option value="stable" data-i18n="programStable">Stable</option><option value="beta" data-i18n="programBeta">Beta</option></select></div>
+            <button class="secondary" id="program-check" type="button" data-i18n="programCheck">Check for releases</button>
+          </div>
+          <p class="muted" id="program-installed"></p>
+          <p id="program-check-result" class="component-feedback" role="status" hidden></p>
+          <div class="program-notes" id="program-notes" hidden><h4 id="program-version"></h4><p id="program-note-text"></p><a id="program-release-link" target="_blank" rel="noopener noreferrer" data-i18n="programReleaseLink">View release on GitHub</a></div>
+          <p id="program-state" class="component-feedback" role="status" hidden></p>
+          <button class="primary" id="program-update" type="button" data-i18n="programInstall" hidden>Install release…</button>
+        </section>
+        <h3 data-i18n="components">Components</h3>
         <p class="muted" data-i18n="componentsHelp">Checks do not install anything. Updates start only after your confirmation.</p>
         <p id="components-agent" class="error-message" hidden data-i18n="component_agent_unavailable">The host service is unavailable. Install it with off-proxy host-agent install.</p>
         <div id="components-rows" class="components-rows"></div>
@@ -169,7 +183,7 @@
   <dialog id="components-confirm" class="control-dialog" aria-labelledby="components-confirm-title">
     <div class="dialog-content">
       <header class="dialog-header"><h2 id="components-confirm-title">Confirm component update</h2><button class="secondary dialog-close" type="button" data-close="components-confirm" aria-label="Close">×</button></header>
-      <div class="dialog-body"><p id="components-confirm-text">Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.</p><p class="muted" data-i18n="componentsScope">Host Debian, Docker, reverse proxy and application code are not updated by this action.</p></div>
+      <div class="dialog-body"><p id="components-confirm-text">Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.</p><p class="muted" id="components-scope" data-i18n="componentsScope">Host Debian, Docker, reverse proxy and application code are not updated by this action.</p></div>
       <footer class="dialog-footer control-actions"><button class="secondary" type="button" data-close="components-confirm" data-i18n="cancel">Cancel</button><button class="primary" id="components-start" type="button">Start update now</button></footer>
     </div>
   </dialog>

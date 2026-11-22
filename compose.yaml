@@ -10,6 +10,7 @@ x-app: &app
   environment: &env
     MONGO_URI: mongodb://mongo:27017/
     API_TOKEN: ${API_TOKEN:?API_TOKEN fehlt}
+    OFF_PROXY_PROGRAM_COMMIT: ${OFF_PROXY_PROGRAM_COMMIT:-}
   depends_on:
     mongo:
       condition: service_healthy

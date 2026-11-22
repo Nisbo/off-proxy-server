@@ -664,3 +664,24 @@ dialog::backdrop { background:rgb(0 0 0 / 70%); }
 .component-feedback[data-tone="warn"] { color: var(--warning); }
 .components-maintenance .component-feedback { margin: 0 0 12px; }
 #components-dashboard-state { margin-bottom: 14px; }
+
+.program-release {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+}
+.program-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  width: 100%;
+}
+.program-controls select { min-width: 9rem; }
+.program-notes { min-width: 0; width: 100%; }
+.program-notes p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+.program-notes a { color: var(--accent); }
+#program-update { white-space: normal; }

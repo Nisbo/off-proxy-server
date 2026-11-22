@@ -9,7 +9,7 @@ import tarfile
 
 import pytest
 
-SOURCE = Path(__file__).parent
+SOURCE = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ with open(os.environ['FAKE_LOG']+'.downloads','a') as f:f.write(url+'\\n')
 if 'codeload.github.com' in url and os.environ.get('FAKE_FETCH_FAIL')=='1':sys.exit(22)
 if 'raw.githubusercontent.com' in url:shutil.copyfile(pathlib.Path(os.environ['FAKE_SOURCE'])/'off-proxy',dest)
 elif 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['FAKE_RELEASE']},indent=2))
-else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(os.environ['FAKE_RELEASE']+'.tar.gz'),dest)
+else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(url.rsplit('/',1)[-1]+'.tar.gz'),dest)
 ''',
         "docker": '''#!/usr/bin/env python3
 import json,os,pathlib,sys
@@ -49,6 +49,9 @@ if a[:2]==['image','inspect']:
     sys.exit(0)
 if a[:1]==['pull']:sys.exit(1 if os.environ.get('FAKE_PULL_FAIL')=='1' else 0)
 if '-f' not in a:sys.exit(9)
+if 'run' in a and 'releases.py' in a:
+    print(os.environ.get('FAKE_PUBLISHED',''))
+    sys.exit(0 if os.environ.get('FAKE_PUBLISHED') else 1)
 source=a[a.index('-f')+1]
 if 'ps' in a:
     if os.environ.get('FAKE_RUNNING','1')=='1':print('existing-worker')
@@ -75,16 +78,17 @@ sys.exit(0)
         path.write_text(content)
         path.chmod(0o755)
 
-    def archive(release):
+    def archive(release, version=None):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "dashboard.py", "control.py", "security.py", "components.py", "runtime-files.txt", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
-                data = (SOURCE / name).read_bytes()
+            for name in ("app.py", "dashboard.py", "control.py", "security.py", "components.py", "releases.py", "runtime-files.txt", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "tests/test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
+                data = (version+"\n").encode() if name == "VERSION" and version else (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)
                 info.mode = 0o755 if name == "off-proxy" else 0o644
                 tar.addfile(info, io.BytesIO(data))
     archive("a" * 40)
     archive("b" * 40)
+    archive("c" * 40, "0.2.0-beta.1")
 
     def run(*args, **changes):
         return subprocess.run(["bash", str(SOURCE / "off-proxy"), *args],
@@ -282,8 +286,7 @@ def test_runtime_install_excludes_tests_and_development_files(installation):
     root, env, log, run = installation
     assert run('install').returncode == 0
     source = root/'releases'/('a'*40)
-    assert not list(source.glob('test*'))
-    assert not (source/'test_app.py').exists()
+    assert not (source/'tests').exists()
     assert not (source/'requirements-dev.txt').exists()
     assert not (source/'.github').exists()
     assert (source/'security.py').is_file()
@@ -302,6 +305,52 @@ def test_bootstrap_pins_cli_and_archive_to_one_commit(installation):
     assert any('/'+('a'*40)+'/off-proxy' in url for url in downloads)
     assert downloads[-1].endswith('/'+('a'*40))
     assert (root/'.state/current').read_text().strip() == 'a'*40
+
+
+def test_update_beta_head_fetches_only_the_beta_branch(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    result = run("update", "beta", "--head", FAKE_RELEASE="c"*40)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (root / ".state/current").read_text().strip() == "c"*40
+    downloads = Path(str(log)+".downloads").read_text().splitlines()
+    assert sum(url.endswith("/commits/main") for url in downloads) == 1
+    assert sum(url.endswith("/commits/beta") for url in downloads) == 1
+    assert "0.2.0-beta.1 ready" in result.stdout
+
+
+def test_update_beta_installs_the_published_commit_and_requires_the_packaged_version(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    assert run("update", "beta").returncode != 0
+    assert run("update", "beta", FAKE_PUBLISHED="c"*40+" 0.2.0-beta.2").returncode != 0
+    assert (root / ".state/current").read_text().strip() == "a"*40
+    result = run("update", "beta", FAKE_PUBLISHED="c"*40+" 0.2.0-beta.1")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (root / ".state/current").read_text().strip() == "c"*40
+    assert ["api", "releases.py", "beta"] in [call[-3:] for call in docker_calls(log)]
+    assert not any(url.endswith("/commits/beta") for url in Path(str(log)+".downloads").read_text().splitlines())
+
+
+def test_host_program_update_requires_the_same_published_commit(installation):
+    root, env, log, run = installation
+    assert run("install").returncode == 0
+    (root/"data"/"probe").write_text("product data")
+    settings = (root/".env").read_bytes()
+    assert run("program-release-install", "beta", "b"*40, "0.2.0-beta.1",
+               FAKE_PUBLISHED="c"*40+" 0.2.0-beta.1").returncode == 76
+    assert (root / ".state/current").read_text().strip() == "a"*40
+    launcher = Path(env["OFF_PROXY_BIN_DIR"], "off-proxy")
+    original_launcher = launcher.stat().st_ino
+    result = run("program-release-install", "beta", "c"*40, "0.2.0-beta.1",
+                 FAKE_PUBLISHED="c"*40+" 0.2.0-beta.1")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (root / ".state/current").read_text().strip() == "c"*40
+    assert (root / ".state/previous").read_text().strip() == "a"*40
+    assert (root/".env").read_bytes() == settings
+    assert (root/"data"/"probe").read_text() == "product data"
+    assert launcher.stat().st_ino == original_launcher
+    assert not (root/".state"/"components.log").exists()
 
 
 def test_failed_download_leaves_installed_version_and_data_unchanged(installation):

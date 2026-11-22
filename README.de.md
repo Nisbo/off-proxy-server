@@ -74,6 +74,8 @@ ist, läuft der Hintergrunddienst unabhängig von Shell und Browser weiter.
 | `off-proxy test 4062139025398 all` | Produkt in allen verfügbaren Beständen abfragen |
 | `off-proxy password` | GUI-Passwort setzen/zurücksetzen und alle Sitzungen abmelden |
 | `off-proxy update` | Aktuellen Commit von `main` herunterladen und aktivieren |
+| `off-proxy update beta` | Neuestes veröffentlichtes Beta-Release installieren |
+| `off-proxy update beta --head` | Aktuellen Commit von `beta` herunterladen und aktivieren |
 | `off-proxy components-update` | Container-Komponenten manuell erneuern; Programmcode beibehalten |
 | `off-proxy rollback` | Zur vorherigen lokal gespeicherten Software zurückkehren |
 | `off-proxy stop` / `off-proxy start` | Diese Installation stoppen/starten; Daten behalten |
@@ -112,6 +114,27 @@ Quell-Caches werden repariert. Bei einem eigenen Installationsverzeichnis stattd
 wieder mit `off-proxy update`. Neue Laufzeitdateien stehen in `runtime-files.txt`
 statt in einer unveränderlichen Liste des installierten Updaters. Die Produktdatenbank
 wird vom Installer nicht gelöscht.
+
+### Programm-Releases in der Oberfläche
+
+Öffne **Komponenten → Programmupdates**, wähle **Stabil** oder **Beta** und
+klicke auf **Nach Releases suchen**. Die Oberfläche prüft veröffentlichte
+GitHub-Releases und zeigt Version und Release Notes. Mit **Release installieren …**
+und anschließender Bestätigung startest du das Update. Der Host-Dienst prüft das
+ausgewählte Release vor dem Wechsel erneut. Hat es sich geändert, starte eine
+neue Prüfung.
+
+Die Oberfläche merkt sich den Kanal in diesem Browser. Shell-Befehle ändern
+diese Auswahl nicht. Die Oberfläche bietet neuere Releases und den Wechsel
+auf einen veröffentlichten Commit derselben Version an. Für einen Rückschritt
+gibt es die ausdrücklichen Shell-Befehle oder, wo anwendbar, `off-proxy rollback`.
+Bestehende Installationen erhalten diese Funktion mit `off-proxy update`.
+
+Stabile Releases verwenden einen Tag wie `v0.2.0`. Beta-Releases verwenden
+einen als Pre-Release veröffentlichten Tag wie `v0.2.0-beta.1`. Die
+`VERSION`-Datei im getaggten Stand muss genau dieser Version entsprechen.
+Gibt es im gewählten Kanal kein veröffentlichtes Release, zeigt die Oberfläche
+das an.
 
 ### Komponenten manuell aktualisieren
 
@@ -334,7 +357,7 @@ Diese Kompatibilität ist vom normalen Einstieg für neue Installationen getrenn
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q tests
 ```
 
 Tests nutzen erzeugte Beispieldaten, keine echten Produkt-Dumps. `MONGO_TEST_URI`

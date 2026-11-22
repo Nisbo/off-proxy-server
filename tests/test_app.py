@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 import app
-from test_support import Server
+from .test_support import Server
 import security
 
 UI_COOKIES = {}
@@ -333,7 +333,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
     assert Path(".dockerignore").read_text().splitlines() == [
-        "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!components.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
+        "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!components.py", "!releases.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
 

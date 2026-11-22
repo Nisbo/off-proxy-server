@@ -11,9 +11,9 @@ from unittest.mock import patch
 import pytest
 
 import app
-from test_support import Server
+from .test_support import Server
 import security
-from test_app import db, publish
+from .test_app import db, publish
 
 PASSWORD = 'a long test password äöü'
 KEY = 'existing-key-preserved-123456789'

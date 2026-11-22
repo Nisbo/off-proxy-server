@@ -144,6 +144,29 @@
   let authenticated = false, authNonce = "", accessOptions = null, apiKeyDirty = false, lastActivity = 0;
   let controlBusy = false, controlNotice = null, fullKind = null;
   Object.assign(labels.en, {
+    programTitle: "Program updates",
+    programHelp: "Choose a release channel and check GitHub manually. Installation starts after confirmation.",
+    programChannel: "Release channel",
+    programStable: "Stable",
+    programBeta: "Beta",
+    programCheck: "Check for releases",
+    programInstalled: "Installed program version: {version}",
+    programChecking: "Checking published releases…",
+    programNoRelease: "There is no published release in this channel.",
+    programReleaseCurrent: "The installed program version is at least as recent as this release.",
+    programReleaseAvailable: "Available release: {version}",
+    programReleaseLink: "View release on GitHub",
+    programInstall: "Install release…",
+    programConfirmTitle: "Install release {version}?",
+    programConfirmText: "The server prepares the release and briefly restarts the services. Product data, settings and keys are retained.",
+    programStart: "Install release now",
+    programUpdateQueued: "Program update queued.",
+    programSubmitting: "Requesting program update…",
+    programUpdateSuccess: "Program update completed successfully.",
+    programUpdateFailed: "The program update failed. See the host service logs for details.",
+    program_release_changed: "The checked release has changed or expired. Check for releases again.",
+    program_already_current: "The installed program version is at least as recent as this release.",
+    program_check_failed: "Published releases could not be checked. Try again.",
     components: "Components", componentsTitle: "Program & components", manualOnly: "MANUAL UPDATES ONLY",
     componentsHelp: "Nothing is checked or installed automatically. A check only looks for compatible component updates.",
     componentsCheck: "Check for updates", componentsUpdate: "Update components…", componentsStart: "Start update now",
@@ -175,6 +198,29 @@
     componentRestarting: "Restarting services. This page will reconnect automatically…", componentVerifying: "Checking the API after restart…"
   });
   Object.assign(labels.de, {
+    programTitle: "Programmupdates",
+    programHelp: "Wähle einen Release-Kanal und prüfe manuell bei GitHub. Die Installation startet nach deiner Bestätigung.",
+    programChannel: "Release-Kanal",
+    programStable: "Stabil",
+    programBeta: "Beta",
+    programCheck: "Nach Releases suchen",
+    programInstalled: "Installierte Programmversion: {version}",
+    programChecking: "Veröffentlichte Releases werden geprüft …",
+    programNoRelease: "In diesem Kanal gibt es noch kein veröffentlichtes Release.",
+    programReleaseCurrent: "Die installierte Programmversion ist mindestens so aktuell wie dieses Release.",
+    programReleaseAvailable: "Verfügbares Release: {version}",
+    programReleaseLink: "Release auf GitHub ansehen",
+    programInstall: "Release installieren …",
+    programConfirmTitle: "Release {version} installieren?",
+    programConfirmText: "Der Server bereitet das Release vor und startet die Dienste kurz neu. Produktdaten, Einstellungen und Schlüssel bleiben erhalten.",
+    programStart: "Release jetzt installieren",
+    programUpdateQueued: "Programmupdate vorgemerkt.",
+    programSubmitting: "Programmupdate wird angefordert …",
+    programUpdateSuccess: "Programmupdate erfolgreich abgeschlossen.",
+    programUpdateFailed: "Das Programmupdate ist fehlgeschlagen. Details stehen in den Logs des Host-Dienstes.",
+    program_release_changed: "Das geprüfte Release hat sich geändert oder die Prüfung ist abgelaufen. Suche erneut nach Releases.",
+    program_already_current: "Die installierte Programmversion ist mindestens so aktuell wie dieses Release.",
+    program_check_failed: "Veröffentlichte Releases konnten nicht geprüft werden. Bitte erneut versuchen.",
     components: "Komponenten", componentsTitle: "Programm & Komponenten", manualOnly: "NUR MANUELLE UPDATES",
     componentsHelp: "Es wird nichts automatisch geprüft oder installiert. Eine Prüfung sucht nur nach passenden Komponenten-Updates.",
     componentsCheck: "Nach Updates suchen", componentsUpdate: "Komponenten aktualisieren …", componentsStart: "Update jetzt starten",
@@ -207,10 +253,15 @@
   });
   let componentState = null, componentReinstall = false, componentSubmission = null;
   let componentNotice = null, componentDisconnectedAt = null, componentSessionStarted = null;
+  let programCheckBusy = false, programResult = null, programCheckError = null, programConfirm = null;
+  let programChannel = "stable";
+  try { if (localStorage.getItem("off-proxy-release-channel") === "beta") programChannel = "beta"; } catch (_) {}
+  const programAction = "program-update";
+  const updateAction = action => action === "update" || action === programAction;
   const componentNames = ["python", "gunicorn", "mongo"];
   const componentJobActive = (state) => ["pending", "running"].includes(state?.status);
   const componentUpdateActive = () => componentSubmission !== null
-    || (componentState?.action === "update" && componentJobActive(componentState));
+    || (updateAction(componentState?.action) && componentJobActive(componentState));
 
   function recentComponentTime(epoch) {
     if (componentSessionStarted === null || !Number.isFinite(epoch)) return false;
@@ -220,44 +271,72 @@
 
   function renderComponentFeedback(state, allCurrent) {
     let key, tone = "busy";
+    const program = (componentSubmission?.action || componentNotice?.action || state.action) === programAction;
     if (componentDisconnectedAt !== null) {
       key = Date.now() - componentDisconnectedAt >= 120000 ? "componentStillReconnecting" : "componentReconnecting";
     } else if (componentSubmission) {
-      key = {submitting:"componentSubmitting", accepted:"componentUpdateQueued", uncertain:"componentConfirming"}[componentSubmission.status];
+      key = {
+        submitting:program ? "programSubmitting" : "componentSubmitting",
+        accepted:program ? "programUpdateQueued" : "componentUpdateQueued", uncertain:"componentConfirming"
+      }[componentSubmission.status];
     } else if (componentNotice) {
-      key = componentNotice;
+      key = componentNotice.key;
       tone = "error";
     } else if (state.status === "pending") {
-      key = state.action === "update" ? "componentUpdateQueued" : "componentPending";
+      key = program ? "programUpdateQueued" : state.action === "update" ? "componentUpdateQueued" : "componentPending";
     } else if (state.status === "running") {
       const phases = {preparing:"componentPreparing", downloading:"componentDownloading", building:"componentBuilding",
         restarting:"componentRestarting", verifying:"componentVerifying"};
       key = state.action === "check" ? "componentChecking" : phases[state.phase] || "componentPreparing";
     } else {
-      const exceptions = {interrupted:"componentInterrupted", expired:"componentExpired", deferred:"componentDeferred"};
+      const exceptions = {interrupted:"componentInterrupted", expired:"componentExpired", deferred:"componentDeferred", release_changed:"program_release_changed"};
       key = exceptions[state.result];
       if (key) tone = state.result === "deferred" ? "warn" : "error";
       else if (state.status === "failed") {
-        key = state.action === "update" ? "componentUpdateFailed" : "componentFailed";
+        key = program ? "programUpdateFailed" : state.action === "update" ? "componentUpdateFailed" : "componentFailed";
         tone = "error";
       } else if (state.status === "success" && recentComponentTime(state.finished_at)
-          && (state.action === "update" || !allCurrent)) {
-        key = state.action === "update" ? "componentUpdateSuccess" : "componentSuccess";
+          && (updateAction(state.action) || !allCurrent)) {
+        key = program ? "programUpdateSuccess" : state.action === "update" ? "componentUpdateSuccess" : "componentSuccess";
         tone = "good";
       }
     }
     const current = allCurrent && recentComponentTime(state.checked_at) && !componentJobActive(state)
       && !componentSubmission && !componentNotice && (!key || tone === "good");
-    const message = [key ? t(key) : "",
-      current ? t("componentLastCheckCurrent", {time:date(state.checked_at)}) : ""].filter(Boolean).join(" ");
-    for (const id of ["components-state", "components-dashboard-state"]) {
-      const el = $(id);
-      const visible = !!message && (id === "components-state" || current || componentUpdateActive()
-        || componentNotice || state.action === "update");
-      el.hidden = !visible;
-      el.dataset.tone = !key && current ? "good" : tone;
+    const currentText = current ? t("componentLastCheckCurrent", {time:date(state.checked_at)}) : "";
+    for (const id of ["components-state", "program-state", "components-dashboard-state"]) {
+      const el = $(id), dashboard = id === "components-dashboard-state";
+      const showAction = dashboard ? (componentUpdateActive() || componentNotice || updateAction(state.action))
+        : program === (id === "program-state");
+      const showCurrent = id !== "program-state" && !!currentText;
+      const message = [key && showAction ? t(key) : "", showCurrent ? currentText : ""].filter(Boolean).join(" ");
+      el.hidden = !message;
+      el.dataset.tone = key && showAction ? tone : "good";
       if (el.textContent !== message) el.textContent = message;
     }
+  }
+
+  function renderProgram(operationDisabled) {
+    $("program-channel").value = programChannel;
+    $("program-channel").disabled = programCheckBusy;
+    $("program-check").disabled = !connected || programCheckBusy;
+    setText("program-installed", t("programInstalled", {version: snapshot?.version || "—"}));
+    const release = programResult?.release;
+    const available = programResult?.available;
+    const notice = programCheckBusy ? "programChecking" : programCheckError
+      || (programResult && (!release ? "programNoRelease" : !available ? "programReleaseCurrent" : null));
+    const message = $("program-check-result");
+    message.hidden = !notice;
+    message.dataset.tone = programCheckError ? "error" : "busy";
+    if (notice) setText("program-check-result", t(notice));
+    $("program-notes").hidden = !release;
+    if (release) {
+      setText("program-version", available ? t("programReleaseAvailable", {version: release.version}) : release.version);
+      setText("program-note-text", release.notes);
+      $("program-release-link").href = release.url;
+    }
+    $("program-update").hidden = !available;
+    $("program-update").disabled = operationDisabled || programCheckBusy;
   }
 
   function renderComponents() {
@@ -272,9 +351,12 @@
     $("components-update").title = allCurrent && recentComponentTime(state.checked_at)
       ? t("componentLastCheckCurrent", {time:date(state.checked_at)}) : "";
     $("components-reinstall").disabled = operationDisabled;
-    setText("components-confirm-title", t(componentReinstall ? "componentsReinstallTitle" : "componentsConfirmTitle"));
-    setText("components-confirm-text", t(componentReinstall ? "componentsReinstallText" : "componentsConfirmText"));
-    setText("components-start", t(componentReinstall ? "componentsReinstallStart" : "componentsStart"));
+    setText("components-confirm-title", programConfirm ? t("programConfirmTitle", {version: programConfirm.version})
+      : t(componentReinstall ? "componentsReinstallTitle" : "componentsConfirmTitle"));
+    setText("components-confirm-text", t(programConfirm ? "programConfirmText" : componentReinstall ? "componentsReinstallText" : "componentsConfirmText"));
+    setText("components-start", t(programConfirm ? "programStart" : componentReinstall ? "componentsReinstallStart" : "componentsStart"));
+    $("components-scope").hidden = !!programConfirm;
+    renderProgram(operationDisabled);
     renderComponentFeedback(state, allCurrent);
     setText("components-checked", state.checked_at ? t("componentChecked", {time:date(state.checked_at)}) : t("componentNever"));
     const grid = $("components-rows");
@@ -462,11 +544,16 @@
       if (!authenticated || generation !== sessionGeneration) return;
       componentState = componentData;
       componentReachable = true;
+      if (componentData.action === programAction && programResult?.release
+          && programResult.release.commit === componentData.target?.commit) {
+        if (componentData.status === "success") programResult.available = false;
+        if (componentData.result === "release_changed") programResult = null;
+      }
 
       // A poll started before the POST resolved can still contain the previous job.
       if (submission && componentSubmission === submission && submission.status !== "submitting") {
         if (submission.status === "uncertain" && componentData.job === submission.previousJob) {
-          componentNotice = "componentUnconfirmed";
+          componentNotice = {key: "componentUnconfirmed", action: submission.action};
         }
         componentSubmission = null;
       }
@@ -488,6 +575,7 @@
     sessionGeneration++; lookupSequence++; lookupController?.abort();
     authenticated = false; snapshot = null; componentState = null; connected = false; lookupResult = null;
     componentSubmission = null; componentNotice = null; componentDisconnectedAt = null; componentSessionStarted = null;
+    programCheckBusy = false; programResult = null; programCheckError = null; programConfirm = null;
     $("dashboard-content").hidden = true; $("login-panel").hidden = false; $("logout").hidden = true;
     for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
     for (const id of ["api-key", "current-password", "new-password", "repeat-password", "login-password"]) $(id).value = "";
@@ -637,24 +725,26 @@
   async function componentAction(path, values) {
     if (controlBusy || !authenticated) return;
     const generation = sessionGeneration;
-    const update = path === "/ui/components/update";
+    const action = path === "/ui/program/update" ? programAction : path === "/ui/components/update" ? "update" : "check";
+    const update = updateAction(action);
     const previousJob = componentState?.job;
     controlBusy = true;
     componentNotice = null;
-    if (update) componentSubmission = {status:"submitting", previousJob};
+    if (update) componentSubmission = {status:"submitting", previousJob, action};
     renderComponents();
     try {
       const result = await authPost(path, values);
-      if (update) componentSubmission = result.queued ? {status:"accepted", previousJob} : null;
+      if (update) componentSubmission = result.queued ? {status:"accepted", previousJob, action} : null;
     } catch (error) {
       if (generation !== sessionGeneration) return;
       if (update && (!error.status || error.status >= 500) && !labels[language][error.message]) {
         // The worker may have accepted the update just before the web server went away.
-        componentSubmission = {status:"uncertain", previousJob};
+        componentSubmission = {status:"uncertain", previousJob, action};
       } else {
         componentSubmission = null;
         componentNotice = error.message === "components_already_current" ? null
-          : labels[language][error.message] ? error.message : "controlError";
+          : {key: labels[language][error.message] ? error.message : "controlError", action};
+        if (error.message === "program_release_changed") programResult = null;
       }
     } finally {
       if (generation === sessionGeneration) {
@@ -668,14 +758,44 @@
   $("components-check").addEventListener("click", () => componentAction("/ui/components/check",{}));
   for (const [id, reinstall] of [["components-update", false], ["components-reinstall", true]]) {
     $(id).addEventListener("click", () => {
-      componentReinstall = reinstall; renderComponents(); $("components-confirm").showModal();
+      programConfirm = null; componentReinstall = reinstall; renderComponents(); $("components-confirm").showModal();
     });
   }
+  $("program-channel").addEventListener("change", () => {
+    programChannel = $("program-channel").value;
+    programResult = null; programCheckError = null;
+    try { localStorage.setItem("off-proxy-release-channel", programChannel); } catch (_) {}
+    renderComponents();
+  });
+  $("program-check").addEventListener("click", async () => {
+    if (programCheckBusy) return;
+    const generation = sessionGeneration;
+    programCheckBusy = true; programResult = null; programCheckError = null;
+    if (componentNotice?.action === programAction) componentNotice = null;
+    renderComponents();
+    try { programResult = await authPost("/ui/program/check", {channel:programChannel}); }
+    catch (error) {
+      if (generation === sessionGeneration) programCheckError = "program_check_failed";
+    } finally {
+      if (generation === sessionGeneration) { programCheckBusy = false; renderComponents(); }
+    }
+  });
+  $("program-update").addEventListener("click", () => {
+    if (!programResult?.available || $("program-update").disabled) return;
+    programConfirm = programResult.release;
+    renderComponents();
+    $("components-confirm").showModal();
+  });
   $("components-start").addEventListener("click", async () => {
-    $("components-start").disabled=true;
+    $("components-start").disabled = true;
     $("components-confirm").close();
-    await componentAction("/ui/components/update", componentReinstall ? {confirmed:true,reinstall:true} : {confirmed:true});
-    $("components-start").disabled=false;
+    if (programConfirm) {
+      const {channel, commit} = programConfirm;
+      await componentAction("/ui/program/update", {channel, commit, confirmed:true});
+    } else {
+      await componentAction("/ui/components/update", componentReinstall ? {confirmed:true,reinstall:true} : {confirmed:true});
+    }
+    $("components-start").disabled = false;
   });
   $("sync").addEventListener("click", () => {
     $("sync-error").hidden = true;

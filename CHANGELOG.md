@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.19
+
+- EN: Keep main-branch updates in the CLI and add published beta releases and
+  beta-branch commits. Add manual stable and beta release updates to the dashboard.
+- DE: Updates vom Hauptbranch in der Shell beibehalten und veröffentlichte
+  Beta-Releases sowie Commits vom Beta-Branch ergänzen. Stabile und Beta-Releases
+  lassen sich in der Oberfläche manuell prüfen und installieren.
+
 ## 0.1.18
 
 - EN: Date the component status notice and clear it after one hour or a restart.

@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from test_security import Client
+from .test_security import Client
 
 
 @pytest.fixture(scope='module')
@@ -35,8 +35,9 @@ class TestServer(app.Gunicorn):
 TestServer().run()
 '''.replace('PORT',str(port)))
     log = (root/'server.log').open('w')
-    process = subprocess.Popen([sys.executable,str(runner)], cwd=Path(__file__).parent,
-        env=dict(os.environ, PYTHONPATH=str(Path(__file__).parent)), stdout=log, stderr=log)
+    source = Path(__file__).resolve().parents[1]
+    process = subprocess.Popen([sys.executable,str(runner)], cwd=source,
+        env=dict(os.environ, PYTHONPATH=str(source)), stdout=log, stderr=log)
     client = Client(f'http://127.0.0.1:{port}')
     try:
         for _ in range(100):

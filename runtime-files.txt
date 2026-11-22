@@ -3,6 +3,7 @@ dashboard.py
 control.py
 security.py
 components.py
+releases.py
 VERSION
 compose.yaml
 Dockerfile
