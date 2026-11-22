@@ -22,10 +22,9 @@ Products Facts für die Suche im Dashboard oder per API bereit.
    curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh -o off-proxy-install.sh && bash off-proxy-install.sh
    ```
 
-3. Der Installer fragt im Terminal nach dem Passwort für die Weboberfläche.
-   Richte danach den [Zugriff über die IP-Adresse](docs/guide.de.md#zugriff-über-lan-oder-vpn)
-   ein. Öffne die Adresse deiner VM oder deines Containers mit Port `8097`
-   im Browser und melde dich mit dem Passwort an.
+3. Lege im Terminal das Passwort für die Weboberfläche fest. Bestätige
+   **Alle IPv4-Adressen** mit Enter oder [wähle die Adressen aus](docs/guide.de.md#netzwerkzugriff).
+   Öffne anschließend einen der angezeigten Browser-Links und melde dich an.
 4. Klicke in der Weboberfläche unter **Deine Datenbestände** beim gewünschten
    Bestand auf **Vollimport …**, dann auf **Vollimport starten**. Wiederhole das
    für jeden gewünschten Bestand. Erstimporte startest du manuell. Der erste

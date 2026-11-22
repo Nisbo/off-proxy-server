@@ -29,6 +29,11 @@ def installation(tmp_path):
     programs = {
         "id": "#!/bin/sh\necho 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
+        "ip": """#!/bin/sh
+printf '%s\n' '2: eth0 inet 192.0.2.10/24 scope global eth0' \
+    '3: wg0 inet 198.51.100.20/24 scope global wg0' \
+    '4: docker0 inet 172.17.0.1/16 scope global docker0'
+""",
         "curl": '''#!/usr/bin/env python3
 import json,os,pathlib,shutil,sys
 args=sys.argv[1:];dest=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('https://'))
@@ -58,6 +63,11 @@ if 'run' in a and 'releases.py' in a:
     print(os.environ.get('FAKE_PUBLISHED',''))
     sys.exit(0 if os.environ.get('FAKE_PUBLISHED') else 1)
 source=a[a.index('-f')+1]
+if 'config' in a or 'up' in a:
+    bind_ip=os.environ['BIND_IP']
+    overlay=pathlib.Path(a[a.index('-f',a.index('-f')+1)+1]).read_text() if a.count('-f')>1 else None
+    with open(os.environ['FAKE_LOG']+'.binds','a') as f:f.write(json.dumps([a,bind_ip,overlay])+'\\n')
+    if 'up' in a and bind_ip==os.environ.get('FAKE_BIND_FAILURE'):sys.exit(1)
 if 'ps' in a:
     if os.environ.get('FAKE_RUNNING','1')=='1':print('existing-worker')
     sys.exit(0)
@@ -70,6 +80,8 @@ if 'build' in a:
     if 'components.py' in (directory/'Dockerfile').read_text() and not (directory/'components.py').is_file():
         print('components.py: not found',file=sys.stderr);sys.exit(1)
     if os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
+if a[-2:]==['app.py','password-configured']:
+    print('yes' if pathlib.Path(os.environ['FAKE_LOG']+'.password-length').exists() else 'no')
 if a[-2:]==['app.py','password']:
     data=sys.stdin.readline()
     pathlib.Path(os.environ['FAKE_LOG']+'.password-length').write_text(str(len(data.rstrip('\\n'))))
@@ -214,17 +226,15 @@ def test_secrets_and_data_excluded_from_source_control():
     assert all(name in patterns for name in (".env", "data/", "configdb/", "releases/", ".state/"))
 
 
-def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installation):
+def run_in_terminal(env, args, replies):
     import pty
     import select
     import signal
     import time
-    root, env, log, run = installation
-    assert run('install').returncode == 0
-    password = 'eight888'
+
     child, terminal = pty.fork()
     if child == 0:
-        os.execve('/bin/bash', ['bash', str(SOURCE/'off-proxy'), 'password'], env)
+        os.execve('/bin/bash', ['bash', str(SOURCE/'off-proxy'), *args], env)
     output = b''
     sent = 0
     done = False
@@ -234,35 +244,102 @@ def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installati
             readable, _, _ = select.select([terminal], [], [], 0.1)
             if readable:
                 try:
-                    part = os.read(terminal, 4096)
+                    output += os.read(terminal, 4096)
                 except OSError:
-                    break
-                if not part:
-                    break
-                output += part
-                if sent == 0 and b'Neues GUI-Passwort' in output:
-                    os.write(terminal, (password+'\n').encode()); sent = 1
-                if sent == 1 and b'Passwort wiederholen:' in output:
-                    os.write(terminal, (password+'\n').encode()); sent = 2
+                    pass
+                if sent < len(replies) and replies[sent][0] in output:
+                    os.write(terminal, replies[sent][1]+b'\n')
+                    sent += 1
             ended, status = os.waitpid(child, os.WNOHANG)
             if ended:
                 done = True
                 assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors='replace')
                 break
-        if not done:
-            ended, status = os.waitpid(child, os.WNOHANG)
-            if ended:
-                done = True
-                assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors='replace')
-        assert done and sent == 2, output.decode(errors='replace')
-        assert password.encode() not in output
-        assert password not in log.read_text()
-        assert Path(str(log)+'.password-length').read_text() == str(len(password))
+        assert done and sent == len(replies), output.decode(errors='replace')
+        return output.decode()
     finally:
         os.close(terminal)
         if not done:
             os.kill(child, signal.SIGKILL)
             os.waitpid(child, 0)
+
+
+def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    assert run('bind', 'all').returncode != 0
+    password = b'eight888'
+    output = run_in_terminal(env, ['password'], [
+        (b'Neues GUI-Passwort', password), (b'Passwort wiederholen:', password),
+        (b'Auswahl [a]:', b''),
+    ])
+    assert password.decode() not in output + log.read_text()
+    assert Path(str(log)+'.password-length').read_text() == str(len(password))
+    assert 'BIND_IP=0.0.0.0' in (root/'.env').read_text()
+    assert 'http://192.0.2.10:8097/' in output and 'http://198.51.100.20:8097/' in output
+    assert '172.17.0.1' not in output
+    assert not (root/'.state/pending-bind').exists()
+
+
+@pytest.mark.parametrize('choice,addresses', [
+    (b'', ['0.0.0.0']),
+    (b'l', ['127.0.0.1']),
+    (b'2', ['198.51.100.20']),
+    (b'1 2', ['192.0.2.10', '198.51.100.20']),
+])
+def test_interactive_install_offers_bilingual_binding_and_prints_links(installation, choice, addresses):
+    root, env, log, _ = installation
+    output = run_in_terminal(dict(env, OFF_PROXY_BOOTSTRAP_COMMIT='a'*40), ['install'], [
+        (b'New GUI password', b'eight888'), (b'Repeat password', b'eight888'),
+        (b'Auswahl [a]:', choice),
+    ])
+    assert 'All IPv4 addresses / Alle IPv4-Adressen' in output
+    assert 'Local only / Nur lokal' in output
+    assert 'Open in your browser / Im Browser öffnen' in output
+    expected_links = ['127.0.0.1', '192.0.2.10', '198.51.100.20'] if not choice else addresses
+    for address in expected_links:
+        assert f'http://{address}:8097/' in output
+    config = (root/'.env').read_text()
+    assert f'BIND_IP={addresses[0]}\n' in config
+    assert (f'BIND_EXTRA_IPS={addresses[-1]}\n' in config) == (len(addresses) > 1)
+    up_calls = [item for item in docker_calls(Path(str(log)+'.binds')) if 'up' in item[0]]
+    assert up_calls[0][1] == '127.0.0.1'
+    if choice != b'l':
+        assert up_calls[-1][0][-5:] == ['up', '-d', '--no-deps', '--no-build', 'api']
+        assert up_calls[-1][1] == addresses[0]
+    if len(addresses) > 1:
+        assert "198.51.100.20:${PORT:-8097}:8080" in up_calls[-1][2]
+
+
+def test_bind_preserves_settings_on_update_and_failed_rebind(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    # Simulate a previously configured, existing installation.
+    (root/'.state/pending-bind').unlink()
+    with (root/'.env').open('a') as settings:
+        settings.write('KEEP=existing\n')
+    result = run('bind', '192.0.2.10', '198.51.100.20', '198.51.100.20')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'http://192.0.2.10:8097/' in result.stdout
+    assert 'http://198.51.100.20:8097/' in result.stdout
+    saved = (root/'.env').read_bytes()
+    assert b'KEEP=existing\n' in saved and b'BIND_EXTRA_IPS=198.51.100.20\n' in saved
+    assert run('update', FAKE_RELEASE='b'*40).returncode == 0
+    assert (root/'.env').read_bytes() == saved
+    assert run('rollback').returncode == 0
+    assert (root/'.env').read_bytes() == saved
+    result = run('bind', 'all', FAKE_BIND_FAILURE='0.0.0.0')
+    assert result.returncode != 0, result.stdout
+    assert 'vorherige Einstellung wird wiederhergestellt' in result.stderr
+    assert (root/'.env').read_bytes() == saved
+    assert (root/'.env').stat().st_mode & 0o777 == 0o600
+    up_calls = [item for item in docker_calls(Path(str(log)+'.binds')) if 'up' in item[0]]
+    assert [item[1] for item in up_calls[-2:]] == ['0.0.0.0', '192.0.2.10']
+    assert run('bind', '999.1.1.1').returncode != 0
+    assert (root/'.env').read_bytes() == saved
+    output = run_in_terminal(env, ['bind'], [(b'Auswahl [beibehalten]', b'l')])
+    assert '127.0.0.1:8097' in output
+    assert b'BIND_EXTRA_IPS=' not in (root/'.env').read_bytes()
 
 
 def test_runtime_install_excludes_tests_and_development_files(installation):

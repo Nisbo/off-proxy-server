@@ -5,6 +5,7 @@ replaced with local source archives; Docker, Compose, MongoDB and HTTP are real.
 No external OFF exports are downloaded.
 """
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -141,6 +142,29 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         manage('update',cli=root/'off-proxy')  # Same old version: does not restart/import.
 
         assert (root/'.env').read_bytes() == initial_env
+
+        def published_addresses():
+            container = compose('ps', '-q', 'api').stdout.strip()
+            inspected = subprocess.run(
+                ['docker', 'inspect', '--format', '{{json .NetworkSettings.Ports}}', container],
+                text=True, capture_output=True, check=True, timeout=15,
+            )
+            return {port['HostIp'] for port in json.loads(inspected.stdout)['8080/tcp']}
+
+        manage('bind', 'all')
+        assert published_addresses() == {'0.0.0.0'}
+        assert client.call('/ui/status')[0] == 200
+        interfaces = subprocess.run(['ip', '-o', '-4', 'address', 'show', 'up', 'scope', 'global'],
+                                    text=True, capture_output=True, check=True, timeout=5)
+        addresses = list(dict.fromkeys(line.split()[3].split('/')[0]
+                                      for line in interfaces.stdout.splitlines()))
+        if len(addresses) >= 2:
+            manage('bind', *addresses[:2])
+            assert published_addresses() == set(addresses[:2])
+        manage('bind', 'local')
+        assert published_addresses() == {'127.0.0.1'}
+        assert client.call('/health', key=rotated)[1]['version'] == version
+        assert client.call('/ui/status')[0] == 200
     except Exception:
         if (root/'.env').exists() and (root/'releases'/('a'*40)/'server'/'compose.yaml').exists():
             diagnostic = compose('logs','--tail','80','api','sync')

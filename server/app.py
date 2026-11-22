@@ -32,7 +32,7 @@ import security
 import components
 import releases
 
-VERSION = "0.1.21"
+VERSION = "0.1.22"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",

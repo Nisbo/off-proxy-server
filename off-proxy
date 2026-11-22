@@ -49,13 +49,52 @@ version_for() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die 'Invalid source VERSION.'
   printf '%s' "$version"
 }
-compose_images() {
-  local source=$1 image_tag=$2 mongo_image=$3 program=$1/server; shift 3
+env_setting() {
+  awk -v key="$1" -v fallback="${2:-}" '
+    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" key "[[:space:]]*=" {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      sub(/[[:space:]]+#.*/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      quote = substr(value, 1, 1)
+      if (quote == "\"" || quote == sprintf("%c", 39)) value = substr(value, 2, length(value)-2)
+    }
+    END { print (value == "" ? fallback : value) }
+  ' "$ROOT/.env"
+}
+
+ipv4_address() {
+  [[ $1 =~ ^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]] &&
+    (( BASH_REMATCH[1] <= 255 && BASH_REMATCH[2] <= 255 && BASH_REMATCH[3] <= 255 && BASH_REMATCH[4] <= 255 ))
+}
+
+compose_images() (
+  local source=$1 image_tag=$2 mongo_image=$3 program=$1/server extra address
+  local -a files=() addresses=()
+  shift 3
+  files=(-f "$program/compose.yaml")
+  extra=$(env_setting BIND_EXTRA_IPS)
+  if [[ -n $extra ]]; then
+    # Compose merges port mappings by host IP, published port and container port.
+    local overlay
+    overlay=$(mktemp "$ROOT/.state/bind-compose.XXXXXX")
+    trap 'rm -f -- "$overlay"' EXIT
+    IFS=, read -r -a addresses <<< "$extra"
+    {
+      printf 'services:\n  api:\n    ports:\n'
+      for address in "${addresses[@]}"; do
+        ipv4_address "$address" || die "Invalid additional IPv4 address: $address"
+        printf "      - '%s:\${PORT:-8097}:8080'\n" "$address"
+      done
+    } > "$overlay"
+    files+=(-f "$overlay")
+  fi
+  BIND_IP=$(env_setting BIND_IP 127.0.0.1) \
   OFF_PROXY_SOURCE_DIR=$program OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
   OFF_PROXY_PROGRAM_COMMIT=${source##*/} \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
-      -p "$PROJECT" -f "$program/compose.yaml" "$@"
-}
+      -p "$PROJECT" "${files[@]}" "$@"
+)
 image_tag_for() {
   local release
   release=$(basename "$1")
@@ -458,6 +497,157 @@ components_worker() {
   done
 }
 
+host_ipv4_addresses() {
+  {
+    if command -v ip >/dev/null && ip -o -4 address show up scope global 2>/dev/null; then
+      :
+    else
+      hostname -I 2>/dev/null | awk '{ for (i=1; i<=NF; i++) print "0 host inet "$i }' || true
+    fi
+  } | awk '$2 != "docker0" && !($2 ~ /^br-[0-9a-f]+$/ && length($2) == 15) && $3 == "inet" {
+    split($4, address, "/")
+    if (!seen[address[1]]++) print address[1]
+  }' | while IFS= read -r address; do
+    if ipv4_address "$address" && [[ $address != 127.* && $address != 0.* ]]; then printf '%s\n' "$address"; fi
+  done
+}
+
+show_bind() {
+  local first extra address port
+  first=$(env_setting BIND_IP 127.0.0.1)
+  extra=$(env_setting BIND_EXTRA_IPS)
+  port=${PORT:-$(env_setting PORT 8097)}
+  printf 'Current bind / Aktuelle Bindung: %s\n' "$first${extra:+, $extra}"
+  printf 'Open in your browser / Im Browser öffnen:\n'
+  if [[ $first == 0.0.0.0 ]]; then
+    printf '  http://127.0.0.1:%s/ (local / lokal)\n' "$port"
+    while IFS= read -r address; do
+      printf '  http://%s:%s/\n' "$address" "$port"
+    done < <(host_ipv4_addresses)
+  else
+    while IFS= read -r address; do
+      [[ $address != *:* || $address == \[*\] ]] || address="[$address]"
+      printf '  http://%s:%s/\n' "$address" "$port"
+    done < <(printf '%s\n' "$first${extra:+,$extra}" | tr ',' '\n')
+  fi
+}
+
+choose_bind() {
+  local mode=$1 address choice index
+  local -a detected=() choices=()
+  while IFS= read -r address; do detected+=("$address"); done < <(host_ipv4_addresses)
+  printf '\nDashboard and API address / Adresse für Weboberfläche und API\n' >/dev/tty
+  printf '  a  All IPv4 addresses / Alle IPv4-Adressen\n  l  Local only / Nur lokal (127.0.0.1)\n' >/dev/tty
+  for index in "${!detected[@]}"; do
+    printf '  %d  %s\n' "$((index + 1))" "${detected[index]}" >/dev/tty
+  done
+  printf 'All addresses can include public interfaces. / Alle Adressen können öffentliche Schnittstellen einschließen.\n' >/dev/tty
+  while true; do
+    if [[ $mode == install ]]; then
+      printf 'Select a, l or numbers separated by spaces [a] / Auswahl [a]: ' >/dev/tty
+    else
+      printf 'Select a, l or numbers separated by spaces [keep] / Auswahl [beibehalten]: ' >/dev/tty
+    fi
+    read -r -a choices </dev/tty || die 'Selection cancelled / Auswahl abgebrochen.'
+    choice=${choices[0]:-}
+    BIND_SELECTION=()
+    case "$choice" in
+      '') if [[ $mode == install ]]; then BIND_SELECTION=(all); fi; return ;;
+      a) if (( ${#choices[@]} == 1 )); then BIND_SELECTION=(all); return; fi ;;
+      l) if (( ${#choices[@]} == 1 )); then BIND_SELECTION=(local); return; fi ;;
+      *)
+        for choice in "${choices[@]}"; do
+          if [[ ! $choice =~ ^[1-9][0-9]{0,5}$ ]] || (( choice > ${#detected[@]} )); then break; fi
+          BIND_SELECTION+=("${detected[choice-1]}")
+        done
+        if [[ -n ${BIND_SELECTION[0]:-} ]] && (( ${#BIND_SELECTION[@]} == ${#choices[@]} )); then return; fi
+        ;;
+    esac
+    printf 'Invalid selection / Ungültige Auswahl.\n' >/dev/tty
+  done
+}
+
+apply_bind() (
+  local source first address extra='' running staging restart=false committed=false
+  local -a addresses=()
+  case "$1" in
+    all|local)
+      [[ $# == 1 ]] || die 'Choose all, local or IPv4 addresses / Wähle all, local oder IPv4-Adressen.'
+      if [[ $1 == all ]]; then first=0.0.0.0; else first=127.0.0.1; fi
+      ;;
+    *)
+      for address in "$@"; do
+        ipv4_address "$address" && [[ $address != 0.* && $address != 127.* ]] ||
+          die "Invalid IPv4 address / Ungültige IPv4-Adresse: $address"
+        [[ " ${addresses[*]:-} " != *" $address "* ]] || continue
+        addresses+=("$address")
+      done
+      first=${addresses[0]}
+      if (( ${#addresses[@]} > 1 )); then extra=$(IFS=,; printf '%s' "${addresses[*]:1}"); fi
+      ;;
+  esac
+  [[ $first != "$(env_setting BIND_IP 127.0.0.1)" || $extra != "$(env_setting BIND_EXTRA_IPS)" ]] || return 0
+
+  source=$(current_source)
+  running=$(compose_at "$source" ps --status running -q api)
+  staging=$(mktemp -d "$ROOT/.state/bind.XXXXXX")
+  trap '
+    if ! "$committed" && [[ -f $staging/previous ]]; then
+      mv -f -- "$staging/previous" "$ROOT/.env"
+      if "$restart"; then
+        compose_at "$source" up -d --no-deps --no-build api ||
+          printf "Previous API could not be restarted. / Vorherige API konnte nicht gestartet werden.\n" >&2
+      fi
+    fi
+    rm -rf -- "$staging"
+  ' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  cp -p -- "$ROOT/.env" "$staging/previous"
+  (
+    umask 077
+    awk '!/^[[:space:]]*(export[[:space:]]+)?BIND_(IP|EXTRA_IPS)[[:space:]]*=/' "$ROOT/.env"
+    printf 'BIND_IP=%s\n' "$first"
+    if [[ -n $extra ]]; then printf 'BIND_EXTRA_IPS=%s\n' "$extra"; fi
+  ) > "$staging/next"
+  chmod 600 "$staging/next"
+  mv -f -- "$staging/next" "$ROOT/.env"
+  compose_at "$source" config --quiet || die 'Invalid bind configuration / Ungültige Adresseinstellung.'
+  if [[ -n $running ]]; then
+    restart=true
+    if ! compose_at "$source" up -d --no-deps --no-build api || ! wait_api "$source" "$(version_for "$source")"; then
+      die 'Could not activate the new address. Restoring the previous settings. / Neue Adresse konnte nicht aktiviert werden. Die vorherige Einstellung wird wiederhergestellt.'
+    fi
+  fi
+  committed=true
+)
+
+finish_install_bind() {
+  if [[ -f $ROOT/.state/pending-bind ]] && (: </dev/tty) 2>/dev/null; then
+    choose_bind install
+    apply_bind "${BIND_SELECTION[@]}"
+    rm -f -- "$ROOT/.state/pending-bind"
+  fi
+  show_bind
+}
+
+bind_command() {
+  if [[ $# == 0 ]]; then
+    show_bind
+    (: </dev/tty) 2>/dev/null || return 0
+    choose_bind change
+    [[ -n ${BIND_SELECTION[0]:-} ]] || return 0
+    set -- "${BIND_SELECTION[@]}"
+  fi
+  if [[ -f $ROOT/.state/pending-bind ]]; then
+    [[ $(compose_current exec -T api python app.py password-configured) == yes ]] ||
+      die 'Set the dashboard password first with off-proxy password / Lege zuerst mit off-proxy password das Passwort fest.'
+  fi
+  apply_bind "$@"
+  rm -f -- "$ROOT/.state/pending-bind"
+  show_bind
+}
+
 prepare_install() {
   validate_root
   if [[ -e $ROOT && ! -f $ROOT/.state/managed ]]; then die "Directory already exists: $ROOT"; fi
@@ -476,6 +666,7 @@ prepare_install() {
   chmod 600 "$ROOT/.env"
   printf '%s\n' "$RUNTIME" > "$ROOT/.state/runtime"
   printf '%s\n' "$PROJECT" > "$ROOT/.state/project"
+  touch "$ROOT/.state/pending-bind"
   printf '1\n' > "$ROOT/.state/managed"
 }
 
@@ -527,7 +718,7 @@ password_setup() {
 main() {
   local action=${1:-help} old next
   if [[ $action == help || $action == --help ]]; then
-    printf 'off-proxy update [beta [--head]]|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
+    printf 'off-proxy update [beta [--head]]|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n  off-proxy bind [all|local|IPv4 ...]\n'
     return
   fi
   require_root; prerequisites
@@ -541,9 +732,14 @@ main() {
       [[ $(version_for "$(source_for "$RELEASE")") == "$OFF_PROXY_BOOTSTRAP_VERSION" ]] ||
         die 'Release tag and packaged version differ. Existing services unchanged.'
     fi
-    if [[ $old == "$RELEASE" ]]; then install_command "$(source_for "$old")"; printf 'Already current.\n'; password_setup install; return; fi
-    activate "$RELEASE" "$old"
+    if [[ $old == "$RELEASE" ]]; then
+      install_command "$(source_for "$old")"
+      printf 'Already current.\n'
+    else
+      activate "$RELEASE" "$old"
+    fi
     password_setup install
+    finish_install_bind
     return
   fi
   load_state
@@ -569,7 +765,10 @@ main() {
     start) lock_operation; compose_current up -d --no-build ;;
     stop) lock_operation; compose_current stop ;;
     down) lock_operation; compose_current down ;;
-    password) lock_operation; password_command ;;
+    password)
+      lock_operation; password_command
+      if [[ -f $ROOT/.state/pending-bind ]]; then finish_install_bind; fi ;;
+    bind) shift; lock_operation; bind_command "$@" ;;
     status) status_command ;;
     logs) compose_current logs -f --tail 40 sync ;;
     test) test_command "${2:-4062139025398}" "${3:-all}" ;;
