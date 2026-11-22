@@ -183,14 +183,16 @@ A convenient server-side test uses the stored key automatically:
 off-proxy test 0000527000057 beauty
 ```
 
-For curl, copy the current key from the GUI and enter it at the hidden prompt:
+For a curl lookup, use the browser address shown by the installer or by
+`off-proxy bind`. Copy the current API key from the dashboard.
 
 ```sh
+read -r -p 'Browser address: ' BASE_URL
 read -r -s -p 'Current API key: ' TOKEN
 printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:8097/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url'
-unset TOKEN
+  "${BASE_URL%/}/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url"
+unset TOKEN BASE_URL
 ```
 
 | Parameter | Supported values |
@@ -245,8 +247,9 @@ separate environment. Software rollback does not replace these backups.
 - GUI reports a delta gap: choose continue/pause; approve a full import when suitable.
 - After an update: reload the browser page; API key changes do not require a restart.
 
-To remove services, use `off-proxy down`. Delete directories only if you also
-intend to remove their data. There is no global Docker prune or automatic cleanup
+`off-proxy down` removes the project containers and networks. The systemd helper
+stays installed and enabled. Delete directories only if you also intend to
+remove their data. There is no global Docker prune or automatic cleanup
 of unrelated images. Retained application images/source versions permit rollback.
 
 ## Development and verification

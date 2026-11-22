@@ -50,11 +50,14 @@ elif 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['FAKE_
 else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(url.rsplit('/',1)[-1]+'.tar.gz'),dest)
 ''',
         "docker": '''#!/usr/bin/env python3
-import json,os,pathlib,sys
+import json,os,pathlib,string,sys
 a=sys.argv[1:]
 with open(os.environ['FAKE_LOG'],'a') as f:f.write(json.dumps(a)+'\\n')
 with open(os.environ['FAKE_LOG']+'.images','a') as f:f.write(json.dumps([a,os.environ.get('OFF_PROXY_IMAGE_TAG'),os.environ.get('OFF_PROXY_MONGO_IMAGE')])+'\\n')
-if a[:2]==['compose','version'] or a[:1]==['ps']:sys.exit(0)
+if a[:2]==['compose','version']:sys.exit(0)
+if a[:1]==['ps']:
+    if os.environ.get('FAKE_PROJECT_EXISTS')=='1':print('other-project')
+    sys.exit(0)
 if a[:1]==['inspect']:
     print('sha256:'+'a'*64);sys.exit(0)
 if a[:2]==['image','inspect']:
@@ -69,7 +72,17 @@ if 'run' in a and 'releases.py' in a:
     sys.exit(0)
 source=a[a.index('-f')+1]
 if 'config' in a or 'up' in a:
-    bind_ip=os.environ['BIND_IP']
+    settings={}
+    for line in pathlib.Path(a[a.index('--env-file')+1]).read_text().splitlines():
+        key, separator, value=line.partition('=')
+        if separator:
+            settings[key]=string.Template(value).safe_substitute(settings | dict(os.environ))
+    settings.update(os.environ)
+    if '--environment' in a:
+        for key in ('BIND_IP','PORT'):
+            if key in settings:print(f'{key}={settings[key]}')
+        sys.exit(0)
+    bind_ip=settings.get('BIND_IP','127.0.0.1')
     overlay=pathlib.Path(a[a.index('-f',a.index('-f')+1)+1]).read_text() if a.count('-f')>1 else None
     with open(os.environ['FAKE_LOG']+'.binds','a') as f:f.write(json.dumps([a,bind_ip,overlay])+'\\n')
     if 'up' in a and bind_ip==os.environ.get('FAKE_BIND_FAILURE'):sys.exit(1)
@@ -82,7 +95,7 @@ if 'exec' in a and any('sys.argv[1]' in x for x in a):
     sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source or (os.environ.get('FAKE_COMPONENT_FAIL')=='1' and 'components-' in os.environ.get('OFF_PROXY_IMAGE_TAG','')) else 0)
 if 'build' in a:
     directory=pathlib.Path(source).parent
-    if 'components.py' in (directory/'Dockerfile').read_text() and not (directory/'components.py').is_file():
+    if not (directory/'components.py').is_file():
         print('components.py: not found',file=sys.stderr);sys.exit(1)
     if os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
 if a[-2:]==['app.py','password-configured']:
@@ -140,6 +153,35 @@ def test_new_install_and_idempotent_update(installation):
     assert "Already current" in result.stdout
     assert not any("stop" in call or "up" in call for call in docker_calls(log))
     assert (root / ".env").read_bytes() == secret
+
+
+def test_project_collision_leaves_no_directory_and_install_can_be_retried(installation):
+    root, _, _, run = installation
+    result = run("install", FAKE_PROJECT_EXISTS="1")
+    assert result.returncode != 0
+    assert "A Docker project with this name already exists" in result.stderr
+    assert not root.exists()
+    result = run("install")
+    assert result.returncode == 0, result.stderr
+
+
+def test_update_preserves_compose_interpolation_in_existing_binding(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    (root / ".state/pending-bind").unlink()
+    config = root / ".env"
+    config.write_text(config.read_text().replace(
+        "BIND_IP=127.0.0.1", "SERVER_IP=192.0.2.10\nBIND_IP=${SERVER_IP}",
+    ))
+    before = config.read_bytes()
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
+    assert result.returncode == 0, result.stderr
+    activate_calls = docker_calls(Path(str(log) + ".binds"))
+    assert activate_calls[-1][1] == "192.0.2.10"
+    assert config.read_bytes() == before
+    result = run("bind")
+    assert result.returncode == 0, result.stderr
+    assert "http://192.0.2.10:8097/" in result.stdout
 
 
 def test_update_preserves_managed_runtime_location(installation):
@@ -294,7 +336,7 @@ def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installati
 ])
 def test_interactive_install_offers_bilingual_binding_and_prints_links(installation, choice, addresses):
     root, env, log, _ = installation
-    output = run_in_terminal(dict(env, OFF_PROXY_BOOTSTRAP_COMMIT='a'*40), ['install'], [
+    output = run_in_terminal(dict(env, OFF_PROXY_BOOTSTRAP_COMMIT='a'*40, BIND_IP='203.0.113.30'), ['install'], [
         (b'New GUI password', b'eight888'), (b'Repeat password', b'eight888'),
         (b'Auswahl [a]:', choice),
     ])
@@ -607,7 +649,7 @@ def test_installer_sets_up_request_only_systemd_host_agent(installation):
     systemctl=Path(env['PATH'].split(os.pathsep)[0])/'systemctl'
     systemctl.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG.systemd"\n')
     systemctl.chmod(0o755)
-    result=run('install', OFF_PROXY_DISABLE_HOST_AGENT='0', OFF_PROXY_TEST_SYSTEMD='1', OFF_PROXY_SERVICE_DIR=str(service_dir))
+    result=run('install', OFF_PROXY_DISABLE_HOST_AGENT='0', OFF_PROXY_SERVICE_DIR=str(service_dir))
     assert result.returncode == 0, result.stderr
     units=list(service_dir.glob('*.service'))
     assert len(units)==1

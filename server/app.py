@@ -352,13 +352,10 @@ def sync_one(db, kind):
         if approved:
             control.finish(db, "full:" + kind, str(error)[:500])
         raise
-    else:
-        if approved:
-            control.finish(db, "full:" + kind)
-        return imported or bool(applied)
     finally:
         state = db.state.find_one({"_id": kind}) or {}
         db.state.update_one({"_id": kind}, {"$set": {"full_reasons": full_reasons(state, options)}})
+    return imported or bool(applied)
 
 
 def sync_loop(db, once=False):

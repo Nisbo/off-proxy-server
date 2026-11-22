@@ -333,7 +333,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
     assert Path("server/.dockerignore").read_text().splitlines() == [
-        "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!components.py", "!releases.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
+        "*", "!*.py", "test*.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
 

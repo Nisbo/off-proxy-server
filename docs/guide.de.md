@@ -196,14 +196,16 @@ Ein einfacher Test auf dem Server nutzt den aktuellen Schlüssel automatisch:
 off-proxy test 0000527000057 beauty
 ```
 
-Für curl den aktuellen Schlüssel aus der GUI kopieren und verdeckt eingeben:
+Für die curl-Abfrage verwende den Browser-Link aus der Installation oder aus
+`off-proxy bind`. Kopiere den aktuellen API-Schlüssel aus der Weboberfläche.
 
 ```sh
+read -r -p 'Browser-Adresse: ' BASE_URL
 read -r -s -p 'Aktueller API-Schlüssel: ' TOKEN
 printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:8097/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url'
-unset TOKEN
+  "${BASE_URL%/}/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url"
+unset TOKEN BASE_URL
 ```
 
 | Parameter | Unterstützte Werte |
@@ -260,8 +262,9 @@ getrennt testen. Software-Rollback ersetzt keine Datensicherung.
 - Delta-Lücke: Fortsetzen/Pausieren wählen; Vollimport zu einem passenden Zeitpunkt bestätigen.
 - Nach Update: Browserseite neu laden. Schlüsselwechsel benötigen keinen Neustart.
 
-Zum Entfernen der Dienste `off-proxy down`. Verzeichnisse nur löschen, wenn auch
-ihre Daten entfernt werden sollen. Es gibt kein globales Docker-Prune und keine
+`off-proxy down` entfernt die Projektcontainer und Netzwerke. Der systemd-Helfer
+bleibt installiert und aktiviert. Verzeichnisse nur löschen, wenn auch ihre
+Daten entfernt werden sollen. Es gibt kein globales Docker-Prune und keine
 Bereinigung fremder Images. Aufbewahrte Anwendungsimages und Quellen erlauben Rollback.
 
 ## Entwicklung und Prüfungen

@@ -49,9 +49,9 @@ version_for() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die 'Invalid source VERSION.'
   printf '%s' "$version"
 }
-env_setting() {
-  awk -v key="$1" -v fallback="${2:-}" '
-    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" key "[[:space:]]*=" {
+extra_bind_addresses() {
+  awk '
+    /^[[:space:]]*(export[[:space:]]+)?BIND_EXTRA_IPS[[:space:]]*=/ {
       value = $0
       sub(/^[^=]*=[[:space:]]*/, "", value)
       sub(/[[:space:]]+#.*/, "", value)
@@ -59,7 +59,7 @@ env_setting() {
       quote = substr(value, 1, 1)
       if (quote == "\"" || quote == sprintf("%c", 39)) value = substr(value, 2, length(value)-2)
     }
-    END { print (value == "" ? fallback : value) }
+    END { print value }
   ' "$ROOT/.env"
 }
 
@@ -73,7 +73,7 @@ compose_images() (
   local -a files=() addresses=()
   shift 3
   files=(-f "$program/compose.yaml")
-  extra=$(env_setting BIND_EXTRA_IPS)
+  extra=$(extra_bind_addresses)
   if [[ -n $extra ]]; then
     # Compose merges port mappings by host IP, published port and container port.
     local overlay
@@ -89,7 +89,8 @@ compose_images() (
     } > "$overlay"
     files+=(-f "$overlay")
   fi
-  BIND_IP=$(env_setting BIND_IP 127.0.0.1) \
+  # Fresh installs stay on the address in .env until the password is set.
+  if [[ -f $ROOT/.state/pending-bind ]]; then unset BIND_IP; fi
   OFF_PROXY_SOURCE_DIR=$program OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
   OFF_PROXY_PROGRAM_COMMIT=${source##*/} \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
@@ -407,7 +408,7 @@ install_host_agent() {
   local unit service_dir escaped
   [[ ${OFF_PROXY_DISABLE_HOST_AGENT:-0} != 1 ]] || return 0
   command -v systemctl >/dev/null || return 0
-  [[ -d /run/systemd/system || ${OFF_PROXY_TEST_SYSTEMD:-} == 1 ]] || {
+  systemctl show --property=Version --value >/dev/null 2>&1 || {
     printf 'GUI component actions need systemd / GUI-Komponentenaktionen benötigen systemd. CLI remains available.\n'; return 0;
   }
   unit=$(agent_unit)
@@ -510,23 +511,35 @@ host_ipv4_addresses() {
   done
 }
 
+read_bind_settings() {
+  local settings key value
+  BIND_ADDRESS=127.0.0.1
+  BIND_PORT=8097
+  BIND_EXTRAS=$(extra_bind_addresses)
+  settings=$(compose_current config --environment | awk '/^(BIND_IP|PORT)=/')
+  while IFS='=' read -r key value; do
+    case "$key" in
+      BIND_IP) BIND_ADDRESS=${value:-127.0.0.1} ;;
+      PORT) BIND_PORT=${value:-8097} ;;
+    esac
+  done <<< "$settings"
+}
+
 show_bind() {
-  local first extra address port
-  first=$(env_setting BIND_IP 127.0.0.1)
-  extra=$(env_setting BIND_EXTRA_IPS)
-  port=${PORT:-$(env_setting PORT 8097)}
-  printf 'Current bind / Aktuelle Bindung: %s\n' "$first${extra:+, $extra}"
+  local address
+  read_bind_settings
+  printf 'Current bind / Aktuelle Bindung: %s\n' "$BIND_ADDRESS${BIND_EXTRAS:+, $BIND_EXTRAS}"
   printf 'Open in your browser / Im Browser öffnen:\n'
-  if [[ $first == 0.0.0.0 ]]; then
-    printf '  http://127.0.0.1:%s/ (local / lokal)\n' "$port"
+  if [[ $BIND_ADDRESS == 0.0.0.0 ]]; then
+    printf '  http://127.0.0.1:%s/ (local / lokal)\n' "$BIND_PORT"
     while IFS= read -r address; do
-      printf '  http://%s:%s/\n' "$address" "$port"
+      printf '  http://%s:%s/\n' "$address" "$BIND_PORT"
     done < <(host_ipv4_addresses)
   else
     while IFS= read -r address; do
       [[ $address != *:* || $address == \[*\] ]] || address="[$address]"
-      printf '  http://%s:%s/\n' "$address" "$port"
-    done < <(printf '%s\n' "$first${extra:+,$extra}" | tr ',' '\n')
+      printf '  http://%s:%s/\n' "$address" "$BIND_PORT"
+    done < <(printf '%s\n' "$BIND_ADDRESS${BIND_EXTRAS:+,$BIND_EXTRAS}" | tr ',' '\n')
   fi
 }
 
@@ -584,7 +597,11 @@ apply_bind() (
       if (( ${#addresses[@]} > 1 )); then extra=$(IFS=,; printf '%s' "${addresses[*]:1}"); fi
       ;;
   esac
-  [[ $first != "$(env_setting BIND_IP 127.0.0.1)" || $extra != "$(env_setting BIND_EXTRA_IPS)" ]] || return 0
+  if [[ ${BIND_IP+x} && ! -f $ROOT/.state/pending-bind ]]; then
+    die 'Unset the BIND_IP environment variable before changing the address / Entferne vor der Adressänderung die Umgebungsvariable BIND_IP (unset BIND_IP).'
+  fi
+  read_bind_settings
+  [[ $first != "$BIND_ADDRESS" || $extra != "$BIND_EXTRAS" ]] || return 0
 
   source=$(current_source)
   running=$(compose_at "$source" ps --status running -q api)
@@ -622,6 +639,7 @@ apply_bind() (
 
 finish_install_bind() {
   if [[ -f $ROOT/.state/pending-bind ]] && (: </dev/tty) 2>/dev/null; then
+    unset BIND_IP
     choose_bind install
     apply_bind "${BIND_SELECTION[@]}"
     rm -f -- "$ROOT/.state/pending-bind"
@@ -640,6 +658,7 @@ bind_command() {
   if [[ -f $ROOT/.state/pending-bind ]]; then
     [[ $(compose_current exec -T api python app.py password-configured) == yes ]] ||
       die 'Set the dashboard password first with off-proxy password / Lege zuerst mit off-proxy password das Passwort fest.'
+    unset BIND_IP
   fi
   apply_bind "$@"
   rm -f -- "$ROOT/.state/pending-bind"
@@ -648,17 +667,22 @@ bind_command() {
 
 prepare_install() {
   validate_root
-  if [[ -e $ROOT && ! -f $ROOT/.state/managed ]]; then die "Directory already exists: $ROOT"; fi
-  umask 077
-  mkdir -p "$ROOT/.state" "$ROOT/releases"
-  lock_operation
-  if [[ -f $ROOT/.state/managed ]]; then load_state; return; fi
-  RUNTIME=$ROOT; PROJECT=off-proxy-server
-  if [[ -n $(docker ps -aq --filter label=com.docker.compose.project="$PROJECT") ]]; then
-    die 'A Docker project with this name already exists.'
+  if [[ -f $ROOT/.state/managed ]]; then
+    lock_operation
+    load_state
+    return
   fi
-  local token
+  [[ ! -e $ROOT && ! -L $ROOT ]] || die "Directory already exists: $ROOT"
+  RUNTIME=$ROOT; PROJECT=off-proxy-server
+  local containers token
+  containers=$(docker ps -aq --filter label=com.docker.compose.project="$PROJECT")
+  [[ -z $containers ]] || die 'A Docker project with this name already exists.'
   token=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+  umask 077
+  mkdir -p -- "$(dirname -- "$ROOT")"
+  mkdir -- "$ROOT"
+  mkdir -- "$ROOT/.state" "$ROOT/releases"
+  lock_operation
   printf 'BIND_IP=127.0.0.1\nPORT=8097\nAPI_TOKEN=%s\n' "$token" > "$ROOT/.env"
   mkdir -p "$ROOT/data" "$ROOT/configdb"
   chmod 600 "$ROOT/.env"
