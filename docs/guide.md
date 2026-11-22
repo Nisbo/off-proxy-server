@@ -4,9 +4,9 @@
 
 ## Requirements
 
-You need a Linux machine and a terminal with administrator permissions
-(`root`). If you are signed in as a regular user with `sudo` access, use
-`sudo -i` to open a root terminal.
+You need a Linux system and a shell as `root`. On Proxmox, open the console
+of the VM or container running Docker. If you are signed in as a regular user
+with `sudo` access, run `sudo -i` to switch to `root`.
 
 The installer uses Bash and three small Linux tools. `curl` downloads files,
 `tar` extracts them, and `flock` prevents two installations or updates from
@@ -60,13 +60,19 @@ refresh plus images, backups and growth. For a dataset of that observed size,
 
 ## LAN or VPN access
 
-The service listens at `127.0.0.1:8097` by default. To reach it from another
-device, set `BIND_IP` in `/opt/off-proxy-server/.env` to your server's LAN or VPN
-address and run `off-proxy start`. Change the binding while imports are idle.
-Use your reverse proxy for HTTPS if you serve the dashboard on a domain.
+1. Find the LAN or VPN IP of the Linux system running Docker. Run
+   `ip -br -4 addr show scope global` in the console to list its IPv4
+   addresses. Use your VM or container's network interface, such as `eth0`.
+2. As `root`, open `/opt/off-proxy-server/.env`. Change the
+   `BIND_IP=127.0.0.1` line to your IP, for example `BIND_IP=192.168.1.50`.
+   Save the file and run `off-proxy start` while imports are idle.
+3. Open the IP with port `8097` in a browser, for example
+   `http://192.168.1.50:8097/`, and sign in with the password you set during
+   installation.
 
-The interactive installer asks for an administrator password (8–256 characters).
-If it runs without a terminal, set the password afterward with `off-proxy password`.
+If you did not enter a password during installation, set one from a shell as
+`root` with `off-proxy password` (8–256 characters).
+Use HTTPS at your reverse proxy if you serve the dashboard on a domain.
 
 ## Updates and rollback
 

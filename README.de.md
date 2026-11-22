@@ -14,21 +14,29 @@ Products Facts für die Suche im Dashboard oder per API bereit.
 
 1. Du brauchst einen Linux-Rechner mit Docker. Falls Docker fehlt, findest du den
    [Installationsbefehl in der Anleitung](docs/guide.de.md#docker-einrichten).
-2. Öffne auf dem Server ein Terminal als Administrator (`root`). Der folgende Befehl
-   installiert das neueste veröffentlichte stabile Release.
+2. Melde dich auf dem Linux-System als `root` an. Unter Proxmox führst du den
+   Befehl in der Konsole der VM oder des Containers aus, in dem Docker läuft.
+   Er installiert das neueste veröffentlichte stabile Release.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh -o off-proxy-install.sh && bash off-proxy-install.sh
    ```
 
-3. Lege ein Administrator-Passwort fest und öffne `http://127.0.0.1:8097/` auf dem Server.
-   Für andere Rechner siehe [Zugriff über LAN oder VPN](docs/guide.de.md#zugriff-über-lan-oder-vpn).
-4. Bestätige **Vollimport …** für jeden gewünschten Bestand. Der erste Lebensmittelimport
-   kann Stunden dauern und läuft im Hintergrund.
+3. Der Installer fragt im Terminal nach dem Passwort für die Weboberfläche.
+   Richte danach den [Zugriff über die IP-Adresse](docs/guide.de.md#zugriff-über-lan-oder-vpn)
+   ein. Öffne die Adresse deiner VM oder deines Containers mit Port `8097`
+   im Browser und melde dich mit dem Passwort an.
+4. Klicke in der Weboberfläche unter **Deine Datenbestände** beim gewünschten
+   Bestand auf **Vollimport …**, dann auf **Vollimport starten**. Wiederhole das
+   für jeden gewünschten Bestand. Erstimporte startest du manuell. Der erste
+   Lebensmittelimport kann Stunden dauern und läuft im Hintergrund. Den
+   Fortschritt siehst du unter **Synchronisierung**.
 
 ## Nutzung und Updates
 
-- Teste eine Abfrage mit `off-proxy test 4062139025398 all`.
+- Teste nach dem Lebensmittelimport eine Abfrage unter **Produkt finden**. Gib
+  `4062139025398` ein, wähle **Alle Bestände** und klicke auf **Suchen**.
+  Derselbe Test im Terminal als `root` geht mit `off-proxy test 4062139025398 all`.
 - Unter **Komponenten → Programmupdates** kannst du nach Releases suchen und die Installation starten.
 - Die Anleitung enthält [API, Datenabgleich, Sicherungen und Shell-Befehle](docs/guide.de.md).
 

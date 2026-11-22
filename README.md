@@ -14,21 +14,28 @@ barcode from the dashboard or a compatible application.
 
 1. You need a Linux machine with Docker. If Docker is missing, follow the
    [Docker setup instructions](docs/guide.md#set-up-docker).
-2. Open a terminal as an administrator (`root`) on the server. The command below
-   installs the latest published stable release.
+2. Sign in to the Linux system as `root`. On Proxmox, run the command in the
+   console of the VM or container running Docker. It installs the latest
+   published stable release.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh -o off-proxy-install.sh && bash off-proxy-install.sh
    ```
 
-3. Set an administrator password and open `http://127.0.0.1:8097/` on the server.
-   For access from another computer, see [LAN or VPN access](docs/guide.md#lan-or-vpn-access).
-4. Confirm **Full import…** for each dataset you want. The first food import can
-   take hours and runs in the background.
+3. The installer asks for a dashboard password in the terminal. Then set up
+   [access by IP address](docs/guide.md#lan-or-vpn-access). Open your VM or
+   container address with port `8097` in a browser and sign in with that password.
+4. In the dashboard, under **Your datasets**, select **Full import…** on the
+   dataset you want, then select **Start full import** to confirm. Repeat for
+   each dataset you want. You start initial imports manually. The first food
+   import can take hours and runs in the background. Follow its progress
+   under **Synchronization**.
 
 ## Use and update
 
-- Test a lookup with `off-proxy test 4062139025398 all`.
+- After importing the food dataset, open **Find a product**, enter `4062139025398`, select
+  **All datasets** and click **Search**. You can run the same test in the
+  terminal as `root` with `off-proxy test 4062139025398 all`.
 - Check for releases and start updates under **Components → Program updates**.
 - Find the [API, synchronization, backups and CLI commands](docs/guide.md) in the guide.
 

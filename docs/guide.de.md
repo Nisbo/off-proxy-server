@@ -4,9 +4,10 @@
 
 ## Voraussetzungen
 
-Du brauchst einen Linux-Rechner und ein Terminal mit Administratorrechten
-(`root`). Wenn du als normaler Benutzer angemeldet bist und `sudo` verwenden
-kannst, öffne mit `sudo -i` ein solches Terminal.
+Du brauchst ein Linux-System und eine Shell als `root`. Unter Proxmox öffnest
+du die Konsole der VM oder des Containers, in dem Docker läuft. Wenn du mit
+einem normalen Benutzerkonto und `sudo`-Zugriff angemeldet bist, wechsle mit
+`sudo -i` zu `root`.
 
 Der Installer nutzt Bash und drei kleine Linux-Werkzeuge. `curl` lädt Dateien
 herunter, `tar` entpackt sie und `flock` verhindert, dass zwei Installationen
@@ -61,13 +62,20 @@ freier Speicher eine sinnvolle Reserve.
 
 ## Zugriff über LAN oder VPN
 
-Standardmäßig lauscht die Oberfläche auf `127.0.0.1:8097`. Für den Zugriff von
-einem anderen Gerät setze `BIND_IP` in `/opt/off-proxy-server/.env` auf die
-LAN- oder VPN-Adresse des Servers und führe `off-proxy start` aus. Ändere die
-Bindung bei ruhendem Import. Für Zugriff über eine Domain nutze HTTPS am Reverse Proxy.
+1. Ermittle die LAN- oder VPN-IP des Linux-Systems, auf dem Docker läuft.
+   In der Konsole zeigt `ip -br -4 addr show scope global` die IPv4-Adressen.
+   Verwende die Adresse der Netzwerkschnittstelle deiner VM oder deines
+   Containers, zum Beispiel `eth0`.
+2. Öffne als `root` die Datei `/opt/off-proxy-server/.env`. Ändere die Zeile
+   `BIND_IP=127.0.0.1` auf deine IP, zum Beispiel `BIND_IP=192.168.1.50`.
+   Speichere die Datei und führe `off-proxy start` aus, während kein Import läuft.
+3. Öffne die IP mit Port `8097` im Browser, zum Beispiel
+   `http://192.168.1.50:8097/`, und melde dich mit dem bei der Installation
+   festgelegten Passwort an.
 
-Der interaktive Installer fragt nach einem Administrator-Passwort (8–256 Zeichen).
-Ohne Terminal legst du es nachträglich mit `off-proxy password` fest.
+Falls du bei der Installation kein Passwort eingegeben hast, lege es in der
+Shell als `root` mit `off-proxy password` fest (8–256 Zeichen).
+Für Zugriff über eine Domain nutze HTTPS am Reverse Proxy.
 
 ## Updates und Rollback
 
