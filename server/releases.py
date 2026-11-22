@@ -1,6 +1,7 @@
 """Resolve published OFF Proxy releases to immutable Git commits."""
 import re
 import sys
+from urllib.error import HTTPError
 
 from components import json_url
 
@@ -18,45 +19,50 @@ def version_key(version):
     return int(major), int(minor), int(patch), beta is None, int(beta or 0)
 
 
-def tag_commit(tag):
-    obj = json_url(f"{API}/git/ref/tags/{tag}")["object"]
-    for _ in range(4):
-        if not COMMIT.fullmatch(obj["sha"]):
-            raise ValueError("Invalid tag object")
-        if obj["type"] == "commit":
-            return obj["sha"]
-        if obj["type"] != "tag":
-            break
-        obj = json_url(f"{API}/git/tags/{obj['sha']}")["object"]
-    raise ValueError("Tag does not point to a commit")
+def release_record(channel, row):
+    tag = row["tag_name"]
+    commit = json_url(f"{API}/commits/tags/{tag}")["sha"]
+    if not COMMIT.fullmatch(commit):
+        raise ValueError("Invalid release commit")
+    return {"channel": channel, "version": tag[1:], "commit": commit,
+            "notes": (row.get("body") or "")[:12000], "published_at": row["published_at"],
+            "url": f"https://github.com/Nisbo/off-proxy-server/releases/tag/{tag}"}
+
+
+def release_key(row, *, beta):
+    tag = row.get("tag_name", "")
+    if not tag.startswith("v") or not VERSION.fullmatch(tag[1:]):
+        return None
+    key = version_key(tag[1:])
+    if (row.get("draft") is not False or not row.get("published_at")
+            or row.get("prerelease") is not beta or key[3] == beta):
+        return None
+    return key
 
 
 def latest(channel):
     if channel not in CHANNELS:
         raise ValueError("Invalid release channel")
-    # GitHub returns the most recent releases first. Find the highest version
-    # within the first page containing a release for the selected channel.
+    if channel == "stable":
+        try:
+            row = json_url(f"{API}/releases/latest")
+        except HTTPError as error:
+            if error.code == 404:
+                return None
+            raise
+        if release_key(row, beta=False) is None:
+            raise ValueError("Invalid stable release")
+        return release_record(channel, row)
+
+    # Find the highest beta version within the first page of recent beta releases.
     for page in range(1, 11):
         entries = json_url(f"{API}/releases?per_page=100&page={page}")
         if not isinstance(entries, list):
             raise ValueError("Invalid release list")
-        candidates = []
-        for row in entries:
-            tag = row.get("tag_name", "")
-            if not tag.startswith("v") or not VERSION.fullmatch(tag[1:]):
-                continue
-            key = version_key(tag[1:])
-            stable = channel == "stable"
-            if (row.get("draft") is not False or not row.get("published_at")
-                    or row.get("prerelease") is not (channel == "beta") or key[3] != stable):
-                continue
-            candidates.append((key, row))
+        candidates = [(key, row) for row in entries if (key := release_key(row, beta=True))]
         if candidates:
             _, row = max(candidates, key=lambda candidate: candidate[0])
-            tag = row["tag_name"]
-            return {"channel": channel, "version": tag[1:], "commit": tag_commit(tag),
-                    "notes": (row.get("body") or "")[:12000], "published_at": row["published_at"],
-                    "url": f"https://github.com/Nisbo/off-proxy-server/releases/tag/{tag}"}
+            return release_record(channel, row)
         if len(entries) < 100:
             return None
     raise ValueError("Release lookup exceeded its page limit")

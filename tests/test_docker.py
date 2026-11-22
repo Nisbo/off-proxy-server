@@ -26,12 +26,7 @@ def test_real_install_update_rotation_and_rollback(tmp_path):
     tools.mkdir(); remote.mkdir()
     version = (SOURCE/'VERSION').read_text().strip()
     newer = version.rsplit('.', 1)[0]+'.'+str(int(version.rsplit('.', 1)[1])+1)
-    baseline='e17b3d613c415385bc64e0270fabe335c57fea86'
-    old_cli=tmp_path/'off-proxy-0.1.10'
-    old_cli.write_bytes(subprocess.check_output(['git','show',baseline+':off-proxy'],cwd=SOURCE))
-    subprocess.run(['git','archive','--format=tar.gz','--prefix=source/',
-                    '--output='+str(remote/('a'*40+'.tar.gz')),baseline],cwd=SOURCE,check=True)
-    for commit, target_version in [('b'*40, newer)]:
+    for commit, target_version in [('a'*40, version), ('b'*40, newer)]:
         with tarfile.open(remote/(commit+'.tar.gz'), 'w:gz') as archive:
             for name in runtime_entries(SOURCE):
                 body = (SOURCE/name).read_bytes()
@@ -45,14 +40,15 @@ def test_real_install_update_rotation_and_rollback(tmp_path):
 import json,os,pathlib,shutil,sys
 args=sys.argv[1:];dest=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('https://'))
 if 'raw.githubusercontent.com' in url:shutil.copyfile(pathlib.Path(os.environ['SMOKE_SOURCE'])/'off-proxy',dest)
+elif url.endswith('/releases/latest'):
+    dest.write_text(json.dumps({'tag_name':os.environ['SMOKE_TAG']},indent=2))
 elif 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['SMOKE_COMMIT']},indent=2))
 else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMOKE_COMMIT']+'.tar.gz'),dest)
 ''')
     curl.chmod(0o755)
     env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ['PATH'],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path/'bin'),
-               OFF_PROXY_LEGACY_DIR=str(tmp_path/'not-a-legacy-install'),
-               SMOKE_SOURCE=str(SOURCE), OFF_PROXY_DISABLE_HOST_AGENT='1', SMOKE_COMMIT='a'*40, SMOKE_ARCHIVES=str(remote))
+               SMOKE_SOURCE=str(SOURCE), OFF_PROXY_DISABLE_HOST_AGENT='1', SMOKE_COMMIT='a'*40, SMOKE_TAG='v'+version, SMOKE_ARCHIVES=str(remote))
     def manage(*args, commit='a'*40, cli=SOURCE/'off-proxy'):
         result = subprocess.run(['bash', str(cli), *args], env=dict(env, SMOKE_COMMIT=commit),
                                 text=True, capture_output=True, timeout=300)
@@ -60,9 +56,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         return result
     def compose(*args, data=None):
         commit = (root/'.state/current').read_text().strip() if (root/'.state/current').exists() else 'a'*40
-        program = root/'releases'/commit
-        if (program/'server').is_dir():
-            program /= 'server'
+        program = root/'releases'/commit/'server'
         return subprocess.run(['docker','compose','--project-directory',str(root),'--env-file',str(root/'.env'),
             '-p','off-proxy-server','-f',str(program/'compose.yaml'),*args],
             env=dict(env, OFF_PROXY_SOURCE_DIR=str(program),
@@ -77,7 +71,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         raise AssertionError('worker did not become idle')
     agent = None
     try:
-        manage('install',cli=old_cli)
+        manage(cli=SOURCE/'install.sh')
         initial_env = (root/'.env').read_bytes()
         token = next(line.split('=',1)[1] for line in initial_env.decode().splitlines() if line.startswith('API_TOKEN='))
         client = Client('http://127.0.0.1:8097')
@@ -90,15 +84,8 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         # Keep initial datasets unapproved, so the smoke test never fetches OFF data.
         compose('exec','-T','api','python','-c', 'from app import database,save_product; db=database(); save_product(db.food_smoke,{"code":"0123456789012","product_name":"Preserved smoke product"})')
         manage('status'); wait_idle(client)
-        failed=subprocess.run(['bash',str(old_cli),'update'],env=dict(env,SMOKE_COMMIT='b'*40),
-                              text=True,capture_output=True,timeout=300)
-        assert failed.returncode != 0
-        assert (root/'.state/current').read_text().strip() == 'a'*40
-        assert not (root/'releases'/('b'*40)/'server'/'components.py').exists()
-        assert client.call('/health',key=rotated)[1]['version']=='0.1.10'
-        assert (root/'.env').read_bytes()==initial_env
-        compose('stop','api')  # Bootstrap must also recover an unavailable old API.
-        manage(commit='b'*40,cli=SOURCE/'install.sh')
+        assert client.call('/health', key=rotated)[1]['version'] == version
+        manage('update', commit='b'*40, cli=root/'off-proxy')
         assert (root/'.env').read_bytes() == initial_env
         assert client.call('/health', key=rotated)[1]['version'] == newer
         assert client.call('/health', key=token)[0] == 401
@@ -142,7 +129,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         assert client.call('/health', key=token)[0] == 401
         assert client.call('/ui/status')[0] == 200
         wait_idle(client); manage('rollback')
-        assert client.call('/health', key=rotated)[1]['version'] == '0.1.10'
+        assert client.call('/health', key=rotated)[1]['version'] == version
         assert client.call('/ui/status')[0] == 200
         found = compose('exec','-T','api','python','-c','from app import database; print(database().food_smoke.find_one({"_id":"0123456789012"})["product"]["product_name"])')
         assert found.stdout.strip() == 'Preserved smoke product'
@@ -151,16 +138,16 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         compose('stop','sync')
         compose('exec','-T','api','python','-c','from app import database; database().state.update_one({"_id":"food"},{"$set":{"ready":True,"collection":"food_smoke"}},upsert=True)')
         assert client.call('/api/v3/product/0123456789012.json', key=rotated)[0] == 200
-        manage('update',cli=old_cli)  # Same old version: does not restart/import.
+        manage('update',cli=root/'off-proxy')  # Same old version: does not restart/import.
 
         assert (root/'.env').read_bytes() == initial_env
     except Exception:
-        if (root/'.env').exists() and (root/'releases'/('a'*40)/'compose.yaml').exists():
+        if (root/'.env').exists() and (root/'releases'/('a'*40)/'server'/'compose.yaml').exists():
             diagnostic = compose('logs','--tail','80','api','sync')
             print(diagnostic.stdout, diagnostic.stderr)
         raise
     finally:
         if agent is not None:
             agent.terminate(); agent.wait(timeout=20)
-        if (root/'.env').exists() and (root/'releases'/('a'*40)/'compose.yaml').exists():
+        if (root/'.env').exists() and (root/'releases'/('a'*40)/'server'/'compose.yaml').exists():
             compose('down')

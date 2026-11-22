@@ -24,8 +24,8 @@ def installation(tmp_path):
     log = tmp_path / "docker.log"
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path / "local-bin"),
-               OFF_PROXY_LEGACY_DIR=str(tmp_path / "legacy"),
-               OFF_PROXY_DISABLE_HOST_AGENT='1', FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40)
+               OFF_PROXY_DISABLE_HOST_AGENT='1', FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40,
+               FAKE_STABLE_TAG="v"+(SOURCE/"VERSION").read_text().strip())
     programs = {
         "id": "#!/bin/sh\necho 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
@@ -35,6 +35,9 @@ args=sys.argv[1:];dest=pathlib.Path(args[args.index('-o')+1]);url=next(a for a i
 with open(os.environ['FAKE_LOG']+'.downloads','a') as f:f.write(url+'\\n')
 if 'codeload.github.com' in url and os.environ.get('FAKE_FETCH_FAIL')=='1':sys.exit(22)
 if 'raw.githubusercontent.com' in url:shutil.copyfile(pathlib.Path(os.environ['FAKE_SOURCE'])/'off-proxy',dest)
+elif url.endswith('/releases/latest'):
+    if os.environ.get('FAKE_NO_STABLE')=='1':sys.exit(22)
+    dest.write_text(json.dumps({'tag_name':os.environ['FAKE_STABLE_TAG']},indent=2))
 elif 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['FAKE_RELEASE']},indent=2))
 else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(url.rsplit('/',1)[-1]+'.tar.gz'),dest)
 ''',
@@ -93,8 +96,11 @@ sys.exit(0)
     archive("c" * 40, "0.2.0-beta.1")
 
     def run(*args, **changes):
+        runtime = dict(env, **changes)
+        if args[0] == "install":
+            runtime["OFF_PROXY_BOOTSTRAP_COMMIT"] = runtime["FAKE_RELEASE"]
         return subprocess.run(["bash", str(SOURCE / "off-proxy"), *args],
-                              env=dict(env, **changes), text=True, capture_output=True)
+                              env=runtime, text=True, capture_output=True)
     return root, env, log, run
 
 
@@ -119,49 +125,24 @@ def test_new_install_and_idempotent_update(installation):
     assert (root / ".env").read_bytes() == secret
 
 
-def prepare_legacy(env):
-    legacy = Path(env["OFF_PROXY_LEGACY_DIR"])
-    legacy.mkdir()
-    (legacy / "app.py").write_text('VERSION = "0.1.2"\n')
-    (legacy / "compose.yaml").write_text('name: off-local-api\nx-app:\n  build: .\n')
-    (legacy / "Dockerfile").write_text("FROM python:3.13-slim\n")
-    (legacy / "requirements.txt").write_text("pymongo==4.15.5\n")
-    (legacy / ".env").write_text("API_TOKEN=existing-secret-unchanged\nBIND_IP=127.0.0.1\nPORT=8097\n")
-    (legacy / "data").mkdir()
-    (legacy / "data/database").write_bytes(b"existing 36 GiB represented by sentinel")
-    (legacy / "configdb").mkdir()
-    return legacy
-
-
-def test_migrate_existing_database_and_token_without_copying_data(installation):
-    root, env, log, run = installation
-    legacy = prepare_legacy(env)
-    original = {str(p.relative_to(legacy)): p.read_bytes() for p in legacy.rglob("*") if p.is_file()}
-    result = run("install")
-    assert result.returncode == 0, result.stderr + result.stdout
-    assert (root / ".env").read_bytes() == (legacy / ".env").read_bytes()
-    assert (root / ".state/runtime").read_text().strip() == str(legacy)
-    assert (root / ".state/project").read_text().strip() == "off-local-api"
-    assert (root / ".state/previous").read_text().strip() == "legacy"
-    assert not (root / "data").exists()
-    assert original == {str(p.relative_to(legacy)): p.read_bytes() for p in legacy.rglob("*") if p.is_file()}
-    calls = docker_calls(log)
-    assert all(call[call.index("--project-directory") + 1] == str(legacy)
-               for call in calls if "--project-directory" in call)
-    result = run("rollback")
-    assert result.returncode == 0, result.stderr + result.stdout
-    assert (root / ".state/current").read_text().strip() == "legacy"
-    assert (root / "off-proxy").exists()
-    assert (legacy / "data/database").read_bytes() == original["data/database"]
-
-
-def test_active_import_defers_migration_without_stopping_services(installation):
-    root, env, log, run = installation
-    prepare_legacy(env)
-    result = run("install", FAKE_BUSY="1")
-    assert result.returncode != 0
-    assert "Update deferred" in result.stderr
-    assert not any("stop" in call or "up" in call for call in docker_calls(log))
+def test_update_preserves_managed_runtime_location(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    data_dir = root.parent / "existing-runtime"
+    data_dir.mkdir()
+    (data_dir/"database").write_bytes(b"existing products")
+    (root/".state/runtime").write_text(str(data_dir)+"\n")
+    (root/".state/project").write_text("existing-project\n")
+    settings = (root/".env").read_bytes()
+    log.write_text("")
+    result = run("update", FAKE_RELEASE="b"*40)
+    assert result.returncode == 0, result.stderr
+    assert (root/".env").read_bytes() == settings
+    assert (data_dir/"database").read_bytes() == b"existing products"
+    for call in docker_calls(log):
+        if "--project-directory" in call:
+            assert call[call.index("--project-directory")+1] == str(data_dir)
+            assert call[call.index("-p")+1] == "existing-project"
 
 
 def test_update_preserves_configuration_and_rolls_back(installation):
@@ -298,15 +279,53 @@ def test_runtime_install_excludes_tests_and_development_files(installation):
     assert (program/'web').stat().st_mode & 0o011 == 0o011
 
 
-def test_bootstrap_pins_cli_and_archive_to_one_commit(installation):
-    root, env, log, run = installation
-    result = subprocess.run(['bash', str(SOURCE/'install.sh')], env=env, capture_output=True, text=True)
+def test_bootstrap_pins_stable_cli_and_archive_to_one_commit(installation):
+    root, env, log, _ = installation
+    result = subprocess.run(["bash", str(SOURCE/"install.sh")], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    downloads = Path(str(log)+'.downloads').read_text().splitlines()
-    assert sum('commits/main' in url for url in downloads) == 1
-    assert any('/'+('a'*40)+'/off-proxy' in url for url in downloads)
-    assert downloads[-1].endswith('/'+('a'*40))
-    assert (root/'.state/current').read_text().strip() == 'a'*40
+    downloads = Path(str(log)+".downloads").read_text().splitlines()
+    api = "https://api.github.com/repos/Nisbo/off-proxy-server"
+    assert downloads == [
+        api+"/releases/latest", api+"/commits/tags/"+env["FAKE_STABLE_TAG"],
+        f"https://raw.githubusercontent.com/Nisbo/off-proxy-server/{'a'*40}/off-proxy",
+        f"https://codeload.github.com/Nisbo/off-proxy-server/tar.gz/{'a'*40}",
+    ]
+    assert (root/".state/current").read_text().strip() == "a"*40
+
+
+def test_bootstrap_without_stable_release_never_uses_main(installation):
+    root, env, log, _ = installation
+    result = subprocess.run(["bash", str(SOURCE/"install.sh")], env=dict(env, FAKE_NO_STABLE="1"),
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Kein stabiles Release" in result.stderr
+    assert not root.exists()
+    assert not log.exists()
+    assert Path(str(log)+".downloads").read_text().splitlines() == [
+        "https://api.github.com/repos/Nisbo/off-proxy-server/releases/latest"]
+
+
+def test_bootstrap_refuses_beta_and_mismatched_release_version(installation):
+    root, env, log, _ = installation
+    for tag, expected in [("v0.2.0-beta.1", "Invalid stable release tag"),
+                          ("v9.0.0", "Release tag and packaged version differ")]:
+        result = subprocess.run(["bash", str(SOURCE/"install.sh")], env=dict(env, FAKE_STABLE_TAG=tag),
+                                capture_output=True, text=True)
+        assert result.returncode != 0
+        assert expected in result.stderr
+        assert not (root/".state/current").exists()
+    assert not any("up" in call for call in docker_calls(log))
+
+
+def test_bootstrap_main_requires_an_explicit_argument(installation):
+    root, env, log, _ = installation
+    result = subprocess.run(["bash", str(SOURCE/"install.sh"), "--main", str(root)],
+                            env=dict(env, FAKE_NO_STABLE="1"), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    downloads = Path(str(log)+".downloads").read_text().splitlines()
+    assert downloads[0].endswith("/commits/main")
+    assert not any(url.endswith("/releases/latest") for url in downloads)
+    assert (root/".state/current").read_text().strip() == "a"*40
 
 
 def test_update_beta_head_fetches_only_the_beta_branch(installation):
@@ -316,7 +335,7 @@ def test_update_beta_head_fetches_only_the_beta_branch(installation):
     assert result.returncode == 0, result.stderr + result.stdout
     assert (root / ".state/current").read_text().strip() == "c"*40
     downloads = Path(str(log)+".downloads").read_text().splitlines()
-    assert sum(url.endswith("/commits/main") for url in downloads) == 1
+    assert not any(url.endswith("/commits/main") for url in downloads)
     assert sum(url.endswith("/commits/beta") for url in downloads) == 1
     assert "0.2.0-beta.1 ready" in result.stdout
 
@@ -486,74 +505,6 @@ def test_installer_sets_up_request_only_systemd_host_agent(installation):
     assert not list(service_dir.glob('*.timer'))
     assert 'enable ' in Path(str(log)+'.systemd').read_text()
     assert 'restart ' in Path(str(log)+'.systemd').read_text()
-
-
-def historical_updater(tmp_path):
-    result=subprocess.run(['git','show','e17b3d613c415385bc64e0270fabe335c57fea86:off-proxy'],
-                          cwd=SOURCE,capture_output=True,text=True)
-    if result.returncode:
-        pytest.skip('Historical updater requires repository history (CI fetch-depth: 0)')
-    path=tmp_path/'off-proxy-0.1.10'
-    path.write_text(result.stdout)
-    return path
-
-
-def test_actual_010_updater_failure_is_repaired_by_bootstrap(installation):
-    root, env, log, run=installation
-    assert run('install').returncode == 0
-    before=(root/'.env').read_bytes()
-    old=historical_updater(root.parent)
-    result=subprocess.run(['bash',str(old),'update'],env=dict(env,FAKE_RELEASE='b'*40),capture_output=True,text=True)
-    assert result.returncode != 0
-    incomplete=root/'releases'/('b'*40)
-    assert not (incomplete/'server'/'components.py').exists()
-    assert (root/'.state/current').read_text().strip() == 'a'*40
-    assert (root/'.env').read_bytes()==before
-    result=subprocess.run(['bash',str(SOURCE/'install.sh')],env=dict(env,FAKE_RELEASE='b'*40),capture_output=True,text=True)
-    assert result.returncode == 0, result.stdout+result.stderr
-    assert (incomplete/'server'/'components.py').is_file()
-    assert (incomplete/'server'/'runtime-files.txt').is_file()
-    assert (root/'.state/current').read_text().strip() == 'b'*40
-    assert (root/'.env').read_bytes()==before
-    assert run('update', FAKE_RELEASE='b'*40).returncode == 0
-
-
-def test_flat_019_install_migrates_once_and_supports_rollback(installation):
-    root, env, log, run = installation
-    flat_commit = "e92cffac4d271d53933f6c0b659aa27664d2e3e5"
-    old_cli = root.parent / "off-proxy-0.1.19"
-    archive = Path(env["FAKE_REMOTE"]) / ("a"*40+".tar.gz")
-    result = subprocess.run(["git", "archive", "--format=tar.gz", "--prefix=source/",
-                             f"--output={archive}", flat_commit], cwd=SOURCE, capture_output=True)
-    if result.returncode:
-        pytest.skip("Historical updater requires repository history (CI fetch-depth: 0)")
-    old_cli.write_bytes(subprocess.check_output(["git", "show", flat_commit+":off-proxy"], cwd=SOURCE))
-    installed = subprocess.run(["bash", str(old_cli), "install"], env=env, capture_output=True, text=True)
-    assert installed.returncode == 0, installed.stderr
-    assert (root/"releases"/("a"*40)/"app.py").is_file()
-    with (root/".env").open("a") as config:
-        config.write("PORT=9999\n")
-    settings = (root/".env").read_bytes()
-    (root/"data"/"probe").write_bytes(b"existing product data")
-    (root/"configdb"/"probe").write_bytes(b"existing MongoDB config")
-    failed = subprocess.run(["bash", str(old_cli), "update"], env=dict(env, FAKE_RELEASE="b"*40),
-                            capture_output=True, text=True)
-    assert failed.returncode != 0
-    assert (root/".state/current").read_text().strip() == "a"*40
-
-    updated = subprocess.run(["bash", str(SOURCE/"install.sh"), str(root)], env=dict(env, FAKE_RELEASE="b"*40),
-                             capture_output=True, text=True)
-    assert updated.returncode == 0, updated.stderr+updated.stdout
-    assert (root/".state/current").read_text().strip() == "b"*40
-    assert (root/".state/previous").read_text().strip() == "a"*40
-    assert (root/"releases"/("b"*40)/"server/app.py").is_file()
-    assert (root/".env").read_bytes() == settings
-    assert (root/"data"/"probe").read_bytes() == b"existing product data"
-    assert (root/"configdb"/"probe").read_bytes() == b"existing MongoDB config"
-    assert run("update", FAKE_RELEASE="b"*40).returncode == 0
-    assert run("rollback").returncode == 0
-    assert (root/".state/current").read_text().strip() == "a"*40
-    assert (root/".env").read_bytes() == settings
 
 
 def test_manifest_transports_future_modules_without_updater_changes(installation):

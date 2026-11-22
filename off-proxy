@@ -4,7 +4,6 @@ set -Eeuo pipefail
 
 ROOT=${OFF_PROXY_DIR:-/opt/off-proxy-server}
 BIN_DIR=${OFF_PROXY_BIN_DIR:-/usr/local/bin}
-LEGACY_DIR=${OFF_PROXY_LEGACY_DIR:-/opt/off-local-api}
 TEMP=
 MAINTENANCE_SOURCE=
 
@@ -37,7 +36,7 @@ load_state() {
   [[ $PROJECT =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die 'Invalid Compose project name.'
 }
 source_for() {
-  [[ $1 == legacy || $1 =~ ^[a-f0-9]{40}$ ]] || die 'Invalid saved release identifier.'
+  [[ $1 =~ ^[a-f0-9]{40}$ ]] || die 'Invalid saved release identifier.'
   printf '%s/releases/%s' "$ROOT" "$1"
 }
 current_source() {
@@ -50,13 +49,8 @@ version_for() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die 'Invalid source VERSION.'
   printf '%s' "$version"
 }
-runtime_source() {
-  if [[ -d $1/server ]]; then printf '%s/server' "$1"; else printf '%s' "$1"; fi
-}
-
 compose_images() {
-  local source=$1 image_tag=$2 mongo_image=$3 program; shift 3
-  program=$(runtime_source "$source")
+  local source=$1 image_tag=$2 mongo_image=$3 program=$1/server; shift 3
   OFF_PROXY_SOURCE_DIR=$program OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
   OFF_PROXY_PROGRAM_COMMIT=${source##*/} \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
@@ -127,7 +121,7 @@ validate_runtime_list() {
     case "$name" in
       test*|*/*|*..*|'') return 1 ;;
       *.py) [[ $name =~ ^[a-z][a-z0-9_]*\.py$ ]] || return 1 ;;
-      VERSION|compose.yaml|Dockerfile|.dockerignore|requirements.txt|off-proxy|runtime-files.txt) ;;
+      compose.yaml|Dockerfile|.dockerignore|requirements.txt|runtime-files.txt) ;;
       *) return 1 ;;
     esac
     [[ -f $source/$name && ! -L $source/$name ]] || return 1
@@ -136,8 +130,7 @@ validate_runtime_list() {
   (( count > 0 ))
 }
 runtime_complete() {
-  local source=$1 program name
-  program=$(runtime_source "$source")
+  local source=$1 program=$1/server name
   [[ ! -L $program && ! -L $program/web ]] || return 1
   validate_runtime_list "$program" || return 1
   for name in VERSION off-proxy; do
@@ -167,10 +160,8 @@ fetch_release() {
     tar -xzf "$TEMP/source.tar.gz" --no-same-owner --no-same-permissions \
       --strip-components=1 -C "$TEMP/source"
     version_for "$TEMP/source" >/dev/null
-    local name program target="$TEMP/runtime"
+    local name program="$TEMP/source/server" target="$TEMP/runtime/server"
     runtime_complete "$TEMP/source" || die 'Incomplete or invalid source archive. Existing services unchanged.'
-    program=$(runtime_source "$TEMP/source")
-    if [[ $program == "$TEMP/source/server" ]]; then target="$target/server"; fi
     mkdir -p "$target/web"
     for name in VERSION off-proxy; do
       install -m 644 "$TEMP/source/$name" "$TEMP/runtime/$name"
@@ -185,8 +176,7 @@ fetch_release() {
     chmod 755 "$target" "$target/web"
     [[ ! -f $TEMP/source/LICENSE ]] || cp -p "$TEMP/source/LICENSE" "$TEMP/runtime/LICENSE"
     runtime_complete "$TEMP/runtime" || die 'Incomplete runtime manifest. Existing services unchanged.'
-    # Old updaters may have cached a release without newly introduced modules.
-    # Replace only code for this pinned commit, after the complete archive passed validation.
+    # Replace an incomplete cached snapshot only after validating the archive.
     if [[ -d $ROOT/releases/$RELEASE ]]; then mv "$ROOT/releases/$RELEASE" "$TEMP/incomplete-runtime"; fi
     mv "$TEMP/runtime" "$ROOT/releases/$RELEASE"
   fi
@@ -195,11 +185,9 @@ fetch_release() {
 
 # Shared client code keeps status, update checks and tests working after key rotation.
 API_CLIENT_PY='import json, os, sys, urllib.request, urllib.error
-import importlib.util
 from pymongo import MongoClient
+from security import Security
 def current_key():
-    if importlib.util.find_spec("security") is None: return os.environ["API_TOKEN"]
-    from security import Security
     db=MongoClient(os.environ["MONGO_URI"],serverSelectionTimeoutMS=5000)["off_local"]
     return Security(db,os.environ["API_TOKEN"]).api_key()
 '
@@ -245,6 +233,7 @@ install_command() {
 activate() {
   local next=$1 old=${2:-} mode=${3:-} source expected
   source=$(source_for "$next")
+  runtime_complete "$source" || die 'Unsupported or incomplete application archive. Existing services unchanged.'
   expected=$(version_for "$source")
   compose_at "$source" config --quiet
   [[ -z $old ]] || check_import_idle "$(source_for "$old")"
@@ -318,7 +307,6 @@ update_program() {
 components_update() {
   local source release old_tag old_mongo mongo_container next_tag next_mongo python_base result=0
   source=$(current_source); release=$(basename "$source")
-  [[ $release != legacy && -f $(runtime_source "$source")/security.py ]] || die 'Run off-proxy update first.'
   check_import_idle "$source"
   old_tag=$(image_tag_for "$source")
   # Pin the actual local database image before pulling its moving 8.0 tag.
@@ -386,10 +374,6 @@ install_host_agent() {
     printf 'GUI component actions need systemd / GUI-Komponentenaktionen benötigen systemd. CLI remains available.\n'; return 0;
   }
   unit=$(agent_unit)
-  if [[ ! -f $(runtime_source "$(current_source)")/components.py ]]; then
-    systemctl disable --now "$unit" >/dev/null 2>&1 || true
-    return 0
-  fi
   service_dir=${OFF_PROXY_SERVICE_DIR:-/etc/systemd/system}
   mkdir -p "$service_dir"
   escaped=${ROOT//\\/\\\\}; escaped=${escaped//\"/\\\"}; escaped=${escaped//%/%%}
@@ -481,34 +465,14 @@ prepare_install() {
   mkdir -p "$ROOT/.state" "$ROOT/releases"
   lock_operation
   if [[ -f $ROOT/.state/managed ]]; then load_state; return; fi
-  if [[ -f $LEGACY_DIR/app.py && -f $LEGACY_DIR/compose.yaml && -f $LEGACY_DIR/.env ]]; then
-    RUNTIME=$LEGACY_DIR; PROJECT=off-local-api
-    mkdir "$ROOT/releases/legacy"
-    local name version
-    for name in app.py compose.yaml Dockerfile requirements.txt; do
-      cp -p "$RUNTIME/$name" "$ROOT/releases/legacy/$name"
-    done
-    version=$(sed -nE 's/^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/p' "$RUNTIME/app.py")
-    [[ $version =~ ^0\.1\.[012]$ ]] || die 'Unknown prototype version. No existing services changed.'
-    printf '%s\n' "$version" > "$ROOT/releases/legacy/VERSION"
-    # Normalize only the backup's build context for rollback. Runtime paths stay old.
-    # shellcheck disable=SC2016 # Preserve the literal Compose variable in the backup.
-    sed 's/^  build: \.$/  build:\n    context: ${OFF_PROXY_SOURCE_DIR:-.}/' \
-      "$RUNTIME/compose.yaml" > "$ROOT/releases/legacy/compose.yaml"
-    printf '*\n!app.py\n!Dockerfile\n!requirements.txt\n' > "$ROOT/releases/legacy/.dockerignore"
-    cp -p "$RUNTIME/.env" "$ROOT/.env"
-    write_pointer current legacy
-    printf 'Existing prototype detected: using %s; database and token preserved.\n' "$RUNTIME"
-  else
-    RUNTIME=$ROOT; PROJECT=off-proxy-server
-    if [[ -n $(docker ps -aq --filter label=com.docker.compose.project="$PROJECT") ]]; then
-      die 'A Docker project with this name already exists.'
-    fi
-    local token
-    token=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-    printf 'BIND_IP=127.0.0.1\nPORT=8097\nAPI_TOKEN=%s\n' "$token" > "$ROOT/.env"
-    mkdir -p "$ROOT/data" "$ROOT/configdb"
+  RUNTIME=$ROOT; PROJECT=off-proxy-server
+  if [[ -n $(docker ps -aq --filter label=com.docker.compose.project="$PROJECT") ]]; then
+    die 'A Docker project with this name already exists.'
   fi
+  local token
+  token=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+  printf 'BIND_IP=127.0.0.1\nPORT=8097\nAPI_TOKEN=%s\n' "$token" > "$ROOT/.env"
+  mkdir -p "$ROOT/data" "$ROOT/configdb"
   chmod 600 "$ROOT/.env"
   printf '%s\n' "$RUNTIME" > "$ROOT/.state/runtime"
   printf '%s\n' "$PROJECT" > "$ROOT/.state/project"
@@ -563,15 +527,20 @@ password_setup() {
 main() {
   local action=${1:-help} old next
   if [[ $action == help || $action == --help ]]; then
-    printf 'off-proxy install|update [beta [--head]]|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
+    printf 'off-proxy update [beta [--head]]|components-update|host-agent install|rollback|start|stop|down|status|logs|password|test [EAN] [type]\n'
     return
   fi
   require_root; prerequisites
   if [[ $action == install ]]; then
+    [[ ${OFF_PROXY_BOOTSTRAP_COMMIT:-} =~ ^[a-f0-9]{40}$ ]] || die 'Start installation with install.sh.'
     ROOT=${2:-$ROOT}; prepare_install
     old=$(cat "$ROOT/.state/current" 2>/dev/null || true)
     [[ -z $old ]] || check_import_idle "$(source_for "$old")"
-    fetch_release "${OFF_PROXY_BOOTSTRAP_COMMIT:-}"
+    fetch_release "$OFF_PROXY_BOOTSTRAP_COMMIT"
+    if [[ -n ${OFF_PROXY_BOOTSTRAP_VERSION:-} ]]; then
+      [[ $(version_for "$(source_for "$RELEASE")") == "$OFF_PROXY_BOOTSTRAP_VERSION" ]] ||
+        die 'Release tag and packaged version differ. Existing services unchanged.'
+    fi
     if [[ $old == "$RELEASE" ]]; then install_command "$(source_for "$old")"; printf 'Already current.\n'; password_setup install; return; fi
     activate "$RELEASE" "$old"
     password_setup install

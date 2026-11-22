@@ -1,4 +1,5 @@
 import time
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 import pytest
@@ -17,18 +18,33 @@ def published(tag, *, beta=False, draft=False):
             "body": "Release notes", "published_at": "2026-11-22T10:00:00Z"}
 
 
-@pytest.mark.parametrize("channel,tag", [("stable", "v0.2.0"), ("beta", "v0.3.0-beta.10")])
-def test_release_channels_only_use_published_versions_and_resolve_annotated_tags(channel, tag):
+def test_latest_stable_uses_the_same_published_release_as_the_installer():
+    tag = "v0.2.0"
+    with patch.object(releases, "json_url", side_effect=[published(tag), {"sha": SHA}]) as get:
+        release = releases.latest("stable")
+    assert release["version"] == tag[1:]
+    assert release["commit"] == SHA
+    assert [call.args[0] for call in get.call_args_list] == [
+        releases.API+"/releases/latest", releases.API+"/commits/tags/"+tag,
+    ]
+
+
+def test_missing_stable_release_returns_no_candidate():
+    error = HTTPError(releases.API+"/releases/latest", 404, "No release", {}, None)
+    with patch.object(releases, "json_url", side_effect=error) as get:
+        assert releases.latest("stable") is None
+    assert get.call_count == 1
+
+
+def test_beta_selects_the_highest_published_beta_and_resolves_its_tag():
     entries = [published("v0.9.0", draft=True), published("v0.2.0"),
                published("v0.3.0-beta.9", beta=True), published("v0.3.0-beta.10", beta=True),
                published("v0.4.0-beta.1"), published("v0.9.0", beta=True)]
-    responses = [entries, {"object": {"type": "tag", "sha": "b"*40}},
-                 {"object": {"type": "commit", "sha": SHA}}]
-    with patch.object(releases, "json_url", side_effect=responses) as get:
-        release = releases.latest(channel)
+    with patch.object(releases, "json_url", side_effect=[entries, {"sha": SHA}]) as get:
+        release = releases.latest("beta")
     assert release["commit"] == SHA
-    assert release["version"] == tag[1:]
-    assert get.call_args_list[1].args[0].endswith("/git/ref/tags/" + tag)
+    assert release["version"] == "0.3.0-beta.10"
+    assert get.call_args_list[1].args[0].endswith("/commits/tags/v0.3.0-beta.10")
 
 
 def test_no_beta_release_has_no_branch_fallback():
