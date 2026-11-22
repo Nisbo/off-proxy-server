@@ -58,21 +58,27 @@ used 36 GiB of disk space after import. Allow space for both copies during a ful
 refresh plus images, backups and growth. For a dataset of that observed size,
 80–100 GiB of free space was a reasonable reserve.
 
-## LAN or VPN access
+## Network access
 
-1. Find the LAN or VPN IP of the Linux system running Docker. Run
-   `ip -br -4 addr show scope global` in the console to list its IPv4
-   addresses. Use your VM or container's network interface, such as `eth0`.
-2. As `root`, open `/opt/off-proxy-server/.env`. Change the
-   `BIND_IP=127.0.0.1` line to your IP, for example `BIND_IP=192.168.1.50`.
-   Save the file and run `off-proxy start` while imports are idle.
-3. Open the IP with port `8097` in a browser, for example
-   `http://192.168.1.50:8097/`, and sign in with the password you set during
-   installation.
+The installer prompts for a password (8–256 characters), then offers three options.
 
-If you did not enter a password during installation, set one from a shell as
-`root` with `off-proxy password` (8–256 characters).
-Use HTTPS at your reverse proxy if you serve the dashboard on a domain.
+- **All IPv4 addresses** is the default. The dashboard and API listen on all
+  IPv4 interfaces, including public interfaces if the firewall allows the port.
+- **Specific addresses** are listed by number. Enter the numbers separated by
+  spaces to select more than one.
+- **Local only** binds to `127.0.0.1`, for example for a reverse proxy on
+  the same system.
+
+Open one of the browser links printed by the installer. An installation without
+an interactive terminal starts with local access. Run `off-proxy password`
+as `root` afterward to set the password and choose the addresses.
+
+Run `off-proxy bind` as `root` to change the selection later. Without an
+interactive terminal, the command prints the current binding and links.
+To change the binding directly, run `off-proxy bind all`, `off-proxy bind local`
+or, for example, `off-proxy bind 192.168.1.50 10.0.0.50`. Changing the binding
+briefly restarts the web service if it is running. Updates preserve your
+selection. CLI commands from older versions support only the first selected address. Use HTTPS at the reverse proxy for domain access.
 
 ## Updates and rollback
 
@@ -101,13 +107,17 @@ Git commit. A stable release tag uses the format `v0.2.0`. A beta prerelease use
 | `off-proxy logs` | Follow synchronization logs |
 | `off-proxy test 4062139025398 all` | Look up a barcode across all datasets |
 | `off-proxy password` | Set or reset the dashboard password |
-| `off-proxy update` | Install the latest commit from `main` |
+| `off-proxy bind` | Show or change the dashboard and API addresses |
+| `off-proxy update` | Install the latest published stable release |
 | `off-proxy update beta` | Install the latest published beta release |
 | `off-proxy update beta --head` | Install the latest commit from `beta` |
 | `off-proxy components-update` | Rebuild the installed program with refreshed container components |
 | `off-proxy rollback` | Return to the previous locally stored software version |
 | `off-proxy stop` / `off-proxy start` | Stop or start the services |
 | `off-proxy down` | Remove the project's containers and networks while keeping data |
+
+If the selected channel has no published release, the updater reports that
+no release is available and leaves the installation as it is.
 
 ### Container components
 
@@ -173,14 +183,16 @@ A convenient server-side test uses the stored key automatically:
 off-proxy test 0000527000057 beauty
 ```
 
-For curl, copy the current key from the GUI and enter it at the hidden prompt:
+For a curl lookup, use the browser address shown by the installer or by
+`off-proxy bind`. Copy the current API key from the dashboard.
 
 ```sh
+read -r -p 'Browser address: ' BASE_URL
 read -r -s -p 'Current API key: ' TOKEN
 printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:8097/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url'
-unset TOKEN
+  "${BASE_URL%/}/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url"
+unset TOKEN BASE_URL
 ```
 
 | Parameter | Supported values |
@@ -235,8 +247,9 @@ separate environment. Software rollback does not replace these backups.
 - GUI reports a delta gap: choose continue/pause; approve a full import when suitable.
 - After an update: reload the browser page; API key changes do not require a restart.
 
-To remove services, use `off-proxy down`. Delete directories only if you also
-intend to remove their data. There is no global Docker prune or automatic cleanup
+`off-proxy down` removes the project containers and networks. The systemd helper
+stays installed and enabled. Delete directories only if you also intend to
+remove their data. There is no global Docker prune or automatic cleanup
 of unrelated images. Retained application images/source versions permit rollback.
 
 ## Development and verification

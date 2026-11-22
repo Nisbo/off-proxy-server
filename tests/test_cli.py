@@ -12,6 +12,9 @@ import pytest
 from .test_support import runtime_entries
 
 SOURCE = Path(__file__).resolve().parents[1]
+STABLE_VERSION = (SOURCE / "VERSION").read_text().strip()
+CURRENT_STABLE_RELEASE = f"{'a' * 40} {STABLE_VERSION}"
+NEXT_STABLE_RELEASE = f"{'b' * 40} {STABLE_VERSION}"
 
 
 @pytest.fixture
@@ -25,10 +28,15 @@ def installation(tmp_path):
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path / "local-bin"),
                OFF_PROXY_DISABLE_HOST_AGENT='1', FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40,
-               FAKE_STABLE_TAG="v"+(SOURCE/"VERSION").read_text().strip())
+               FAKE_STABLE_TAG="v"+STABLE_VERSION)
     programs = {
         "id": "#!/bin/sh\necho 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
+        "ip": """#!/bin/sh
+printf '%s\n' '2: eth0 inet 192.0.2.10/24 scope global eth0' \
+    '3: wg0 inet 198.51.100.20/24 scope global wg0' \
+    '4: docker0 inet 172.17.0.1/16 scope global docker0'
+""",
         "curl": '''#!/usr/bin/env python3
 import json,os,pathlib,shutil,sys
 args=sys.argv[1:];dest=pathlib.Path(args[args.index('-o')+1]);url=next(a for a in args if a.startswith('https://'))
@@ -42,11 +50,14 @@ elif 'api.github.com' in url:dest.write_text(json.dumps({'sha':os.environ['FAKE_
 else:shutil.copyfile(pathlib.Path(os.environ['FAKE_REMOTE'])/(url.rsplit('/',1)[-1]+'.tar.gz'),dest)
 ''',
         "docker": '''#!/usr/bin/env python3
-import json,os,pathlib,sys
+import json,os,pathlib,string,sys
 a=sys.argv[1:]
 with open(os.environ['FAKE_LOG'],'a') as f:f.write(json.dumps(a)+'\\n')
 with open(os.environ['FAKE_LOG']+'.images','a') as f:f.write(json.dumps([a,os.environ.get('OFF_PROXY_IMAGE_TAG'),os.environ.get('OFF_PROXY_MONGO_IMAGE')])+'\\n')
-if a[:2]==['compose','version'] or a[:1]==['ps']:sys.exit(0)
+if a[:2]==['compose','version']:sys.exit(0)
+if a[:1]==['ps']:
+    if os.environ.get('FAKE_PROJECT_EXISTS')=='1':print('other-project')
+    sys.exit(0)
 if a[:1]==['inspect']:
     print('sha256:'+'a'*64);sys.exit(0)
 if a[:2]==['image','inspect']:
@@ -55,9 +66,26 @@ if a[:2]==['image','inspect']:
 if a[:1]==['pull']:sys.exit(1 if os.environ.get('FAKE_PULL_FAIL')=='1' else 0)
 if '-f' not in a:sys.exit(9)
 if 'run' in a and 'releases.py' in a:
-    print(os.environ.get('FAKE_PUBLISHED',''))
-    sys.exit(0 if os.environ.get('FAKE_PUBLISHED') else 1)
+    if not os.environ.get('FAKE_PUBLISHED'):
+        sys.exit('No published release in this channel / Kein veröffentlichtes Release in diesem Kanal.')
+    print(os.environ['FAKE_PUBLISHED'])
+    sys.exit(0)
 source=a[a.index('-f')+1]
+if 'config' in a or 'up' in a:
+    settings={}
+    for line in pathlib.Path(a[a.index('--env-file')+1]).read_text().splitlines():
+        key, separator, value=line.partition('=')
+        if separator:
+            settings[key]=string.Template(value).safe_substitute(settings | dict(os.environ))
+    settings.update(os.environ)
+    if '--environment' in a:
+        for key in ('BIND_IP','PORT'):
+            if key in settings:print(f'{key}={settings[key]}')
+        sys.exit(0)
+    bind_ip=settings.get('BIND_IP','127.0.0.1')
+    overlay=pathlib.Path(a[a.index('-f',a.index('-f')+1)+1]).read_text() if a.count('-f')>1 else None
+    with open(os.environ['FAKE_LOG']+'.binds','a') as f:f.write(json.dumps([a,bind_ip,overlay])+'\\n')
+    if 'up' in a and bind_ip==os.environ.get('FAKE_BIND_FAILURE'):sys.exit(1)
 if 'ps' in a:
     if os.environ.get('FAKE_RUNNING','1')=='1':print('existing-worker')
     sys.exit(0)
@@ -67,9 +95,11 @@ if 'exec' in a and any('sys.argv[1]' in x for x in a):
     sys.exit(1 if os.environ.get('FAKE_BAD_RELEASE','@') in source or (os.environ.get('FAKE_COMPONENT_FAIL')=='1' and 'components-' in os.environ.get('OFF_PROXY_IMAGE_TAG','')) else 0)
 if 'build' in a:
     directory=pathlib.Path(source).parent
-    if 'components.py' in (directory/'Dockerfile').read_text() and not (directory/'components.py').is_file():
+    if not (directory/'components.py').is_file():
         print('components.py: not found',file=sys.stderr);sys.exit(1)
     if os.environ.get('FAKE_BUILD_FAIL')=='1':sys.exit(1)
+if a[-2:]==['app.py','password-configured']:
+    print('yes' if pathlib.Path(os.environ['FAKE_LOG']+'.password-length').exists() else 'no')
 if a[-2:]==['app.py','password']:
     data=sys.stdin.readline()
     pathlib.Path(os.environ['FAKE_LOG']+'.password-length').write_text(str(len(data.rstrip('\\n'))))
@@ -118,11 +148,40 @@ def test_new_install_and_idempotent_update(installation):
     assert (root / ".env").stat().st_mode & 0o777 == 0o600
     assert Path(env["OFF_PROXY_BIN_DIR"], "off-proxy").exists()
     log.write_text("")
-    result = run("update")
+    result = run("update", FAKE_PUBLISHED=CURRENT_STABLE_RELEASE)
     assert result.returncode == 0, result.stderr
     assert "Already current" in result.stdout
     assert not any("stop" in call or "up" in call for call in docker_calls(log))
     assert (root / ".env").read_bytes() == secret
+
+
+def test_project_collision_leaves_no_directory_and_install_can_be_retried(installation):
+    root, _, _, run = installation
+    result = run("install", FAKE_PROJECT_EXISTS="1")
+    assert result.returncode != 0
+    assert "A Docker project with this name already exists" in result.stderr
+    assert not root.exists()
+    result = run("install")
+    assert result.returncode == 0, result.stderr
+
+
+def test_update_preserves_compose_interpolation_in_existing_binding(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    (root / ".state/pending-bind").unlink()
+    config = root / ".env"
+    config.write_text(config.read_text().replace(
+        "BIND_IP=127.0.0.1", "SERVER_IP=192.0.2.10\nBIND_IP=${SERVER_IP}",
+    ))
+    before = config.read_bytes()
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
+    assert result.returncode == 0, result.stderr
+    activate_calls = docker_calls(Path(str(log) + ".binds"))
+    assert activate_calls[-1][1] == "192.0.2.10"
+    assert config.read_bytes() == before
+    result = run("bind")
+    assert result.returncode == 0, result.stderr
+    assert "http://192.0.2.10:8097/" in result.stdout
 
 
 def test_update_preserves_managed_runtime_location(installation):
@@ -135,7 +194,7 @@ def test_update_preserves_managed_runtime_location(installation):
     (root/".state/project").write_text("existing-project\n")
     settings = (root/".env").read_bytes()
     log.write_text("")
-    result = run("update", FAKE_RELEASE="b"*40)
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
     assert result.returncode == 0, result.stderr
     assert (root/".env").read_bytes() == settings
     assert (data_dir/"database").read_bytes() == b"existing products"
@@ -149,7 +208,7 @@ def test_update_preserves_configuration_and_rolls_back(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     config = (root / ".env").read_bytes()
-    result = run("update", FAKE_RELEASE="b" * 40)
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
     assert result.returncode == 0, result.stderr
     assert (root / ".state/current").read_text().strip() == "b" * 40
     assert (root / ".env").read_bytes() == config
@@ -161,7 +220,7 @@ def test_failed_build_leaves_old_services_running(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     log.write_text("")
-    result = run("update", FAKE_RELEASE="b" * 40, FAKE_BUILD_FAIL="1")
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_BUILD_FAIL="1")
     assert result.returncode != 0
     assert (root / ".state/current").read_text().strip() == "a" * 40
     assert not any("stop" in call or "up" in call for call in docker_calls(log))
@@ -171,7 +230,7 @@ def test_failed_api_restores_old_services(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     log.write_text("")
-    result = run("update", FAKE_RELEASE="b" * 40, FAKE_BAD_RELEASE="b" * 40)
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_BAD_RELEASE="b" * 40)
     assert result.returncode != 0
     assert "restoring previous" in result.stderr
     assert (root / ".state/current").read_text().strip() == "a" * 40
@@ -184,7 +243,7 @@ def test_update_during_import_does_not_fetch_or_stop(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     log.write_text("")
-    result = run("update", FAKE_BUSY="1", FAKE_RELEASE="b" * 40)
+    result = run("update", FAKE_BUSY="1", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
     assert result.returncode != 0
     assert not (root / "releases" / ("b" * 40)).exists()
     assert not any("stop" in call for call in docker_calls(log))
@@ -214,17 +273,15 @@ def test_secrets_and_data_excluded_from_source_control():
     assert all(name in patterns for name in (".env", "data/", "configdb/", "releases/", ".state/"))
 
 
-def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installation):
+def run_in_terminal(env, args, replies):
     import pty
     import select
     import signal
     import time
-    root, env, log, run = installation
-    assert run('install').returncode == 0
-    password = 'eight888'
+
     child, terminal = pty.fork()
     if child == 0:
-        os.execve('/bin/bash', ['bash', str(SOURCE/'off-proxy'), 'password'], env)
+        os.execve('/bin/bash', ['bash', str(SOURCE/'off-proxy'), *args], env)
     output = b''
     sent = 0
     done = False
@@ -234,35 +291,102 @@ def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installati
             readable, _, _ = select.select([terminal], [], [], 0.1)
             if readable:
                 try:
-                    part = os.read(terminal, 4096)
+                    output += os.read(terminal, 4096)
                 except OSError:
-                    break
-                if not part:
-                    break
-                output += part
-                if sent == 0 and b'Neues GUI-Passwort' in output:
-                    os.write(terminal, (password+'\n').encode()); sent = 1
-                if sent == 1 and b'Passwort wiederholen:' in output:
-                    os.write(terminal, (password+'\n').encode()); sent = 2
+                    pass
+                if sent < len(replies) and replies[sent][0] in output:
+                    os.write(terminal, replies[sent][1]+b'\n')
+                    sent += 1
             ended, status = os.waitpid(child, os.WNOHANG)
             if ended:
                 done = True
                 assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors='replace')
                 break
-        if not done:
-            ended, status = os.waitpid(child, os.WNOHANG)
-            if ended:
-                done = True
-                assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors='replace')
-        assert done and sent == 2, output.decode(errors='replace')
-        assert password.encode() not in output
-        assert password not in log.read_text()
-        assert Path(str(log)+'.password-length').read_text() == str(len(password))
+        assert done and sent == len(replies), output.decode(errors='replace')
+        return output.decode()
     finally:
         os.close(terminal)
         if not done:
             os.kill(child, signal.SIGKILL)
             os.waitpid(child, 0)
+
+
+def test_password_is_entered_twice_in_terminal_and_sent_only_on_stdin(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    assert run('bind', 'all').returncode != 0
+    password = b'eight888'
+    output = run_in_terminal(env, ['password'], [
+        (b'Neues GUI-Passwort', password), (b'Passwort wiederholen:', password),
+        (b'Auswahl [a]:', b''),
+    ])
+    assert password.decode() not in output + log.read_text()
+    assert Path(str(log)+'.password-length').read_text() == str(len(password))
+    assert 'BIND_IP=0.0.0.0' in (root/'.env').read_text()
+    assert 'http://192.0.2.10:8097/' in output and 'http://198.51.100.20:8097/' in output
+    assert '172.17.0.1' not in output
+    assert not (root/'.state/pending-bind').exists()
+
+
+@pytest.mark.parametrize('choice,addresses', [
+    (b'', ['0.0.0.0']),
+    (b'l', ['127.0.0.1']),
+    (b'2', ['198.51.100.20']),
+    (b'1 2', ['192.0.2.10', '198.51.100.20']),
+])
+def test_interactive_install_offers_bilingual_binding_and_prints_links(installation, choice, addresses):
+    root, env, log, _ = installation
+    output = run_in_terminal(dict(env, OFF_PROXY_BOOTSTRAP_COMMIT='a'*40, BIND_IP='203.0.113.30'), ['install'], [
+        (b'New GUI password', b'eight888'), (b'Repeat password', b'eight888'),
+        (b'Auswahl [a]:', choice),
+    ])
+    assert 'All IPv4 addresses / Alle IPv4-Adressen' in output
+    assert 'Local only / Nur lokal' in output
+    assert 'Open in your browser / Im Browser öffnen' in output
+    expected_links = ['127.0.0.1', '192.0.2.10', '198.51.100.20'] if not choice else addresses
+    for address in expected_links:
+        assert f'http://{address}:8097/' in output
+    config = (root/'.env').read_text()
+    assert f'BIND_IP={addresses[0]}\n' in config
+    assert (f'BIND_EXTRA_IPS={addresses[-1]}\n' in config) == (len(addresses) > 1)
+    up_calls = [item for item in docker_calls(Path(str(log)+'.binds')) if 'up' in item[0]]
+    assert up_calls[0][1] == '127.0.0.1'
+    if choice != b'l':
+        assert up_calls[-1][0][-5:] == ['up', '-d', '--no-deps', '--no-build', 'api']
+        assert up_calls[-1][1] == addresses[0]
+    if len(addresses) > 1:
+        assert "198.51.100.20:${PORT:-8097}:8080" in up_calls[-1][2]
+
+
+def test_bind_preserves_settings_on_update_and_failed_rebind(installation):
+    root, env, log, run = installation
+    assert run('install').returncode == 0
+    # Simulate a previously configured, existing installation.
+    (root/'.state/pending-bind').unlink()
+    with (root/'.env').open('a') as settings:
+        settings.write('KEEP=existing\n')
+    result = run('bind', '192.0.2.10', '198.51.100.20', '198.51.100.20')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'http://192.0.2.10:8097/' in result.stdout
+    assert 'http://198.51.100.20:8097/' in result.stdout
+    saved = (root/'.env').read_bytes()
+    assert b'KEEP=existing\n' in saved and b'BIND_EXTRA_IPS=198.51.100.20\n' in saved
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE).returncode == 0
+    assert (root/'.env').read_bytes() == saved
+    assert run('rollback').returncode == 0
+    assert (root/'.env').read_bytes() == saved
+    result = run('bind', 'all', FAKE_BIND_FAILURE='0.0.0.0')
+    assert result.returncode != 0, result.stdout
+    assert 'vorherige Einstellung wird wiederhergestellt' in result.stderr
+    assert (root/'.env').read_bytes() == saved
+    assert (root/'.env').stat().st_mode & 0o777 == 0o600
+    up_calls = [item for item in docker_calls(Path(str(log)+'.binds')) if 'up' in item[0]]
+    assert [item[1] for item in up_calls[-2:]] == ['0.0.0.0', '192.0.2.10']
+    assert run('bind', '999.1.1.1').returncode != 0
+    assert (root/'.env').read_bytes() == saved
+    output = run_in_terminal(env, ['bind'], [(b'Auswahl [beibehalten]', b'l')])
+    assert '127.0.0.1:8097' in output
+    assert b'BIND_EXTRA_IPS=' not in (root/'.env').read_bytes()
 
 
 def test_runtime_install_excludes_tests_and_development_files(installation):
@@ -340,6 +464,36 @@ def test_update_beta_head_fetches_only_the_beta_branch(installation):
     assert "0.2.0-beta.1 ready" in result.stdout
 
 
+@pytest.mark.parametrize("channel, options", [("stable", ()), ("beta", ("beta",))])
+def test_update_without_published_release_does_not_fetch_or_restart(installation, channel, options):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    downloads = Path(str(log)+".downloads")
+    before = downloads.read_bytes()
+    settings = (root/".env").read_bytes()
+    log.write_text("")
+    result = run("update", *options, FAKE_RELEASE="b"*40, FAKE_BUSY="1")
+    assert result.returncode != 0
+    assert "No published release in this channel" in result.stderr
+    assert "Kein veröffentlichtes Release in diesem Kanal" in result.stderr
+    assert (root/".state/current").read_text().strip() == "a"*40
+    assert (root/".env").read_bytes() == settings
+    assert downloads.read_bytes() == before
+    assert [call[-3:] for call in docker_calls(log) if "-f" in call] == [["api", "releases.py", channel]]
+
+
+def test_update_installs_stable_release_commit_instead_of_main_head(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    result = run("update", FAKE_RELEASE="c"*40, FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (root/".state/current").read_text().strip() == "b"*40
+    assert ["api", "releases.py", "stable"] in [call[-3:] for call in docker_calls(log)]
+    downloads = Path(str(log)+".downloads").read_text().splitlines()
+    assert not any("/commits/" in url for url in downloads)
+    assert downloads[-1].endswith("/tar.gz/"+"b"*40)
+
+
 def test_update_beta_installs_the_published_commit_and_requires_the_packaged_version(installation):
     root, _, log, run = installation
     assert run("install").returncode == 0
@@ -379,7 +533,7 @@ def test_failed_download_leaves_installed_version_and_data_unchanged(installatio
     assert run('install').returncode == 0
     before = (root/'.env').read_bytes()
     log.write_text('')
-    assert run('update', FAKE_RELEASE='b'*40, FAKE_FETCH_FAIL='1').returncode != 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_FETCH_FAIL='1').returncode != 0
     assert (root/'.state/current').read_text().strip() == 'a'*40
     assert (root/'.env').read_bytes() == before
     assert not any('stop' in call for call in docker_calls(log))
@@ -389,7 +543,7 @@ def test_racing_cycle_defers_update_after_build_before_stop(installation):
     root, env, log, run = installation
     assert run('install').returncode == 0
     log.write_text('')
-    result = run('update', FAKE_RELEASE='b'*40, FAKE_MAINTENANCE_BUSY='1')
+    result = run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_MAINTENANCE_BUSY='1')
     assert result.returncode != 0
     assert 'deferred' in result.stderr
     calls = docker_calls(log)
@@ -403,7 +557,7 @@ def test_gate_is_acquired_before_stop_and_released_after_success_or_restore(inst
     assert run('install').returncode == 0
     for bad in ('@', 'b'*40):
         log.write_text('')
-        result = run('update', FAKE_RELEASE='b'*40, FAKE_BAD_RELEASE=bad)
+        result = run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_BAD_RELEASE=bad)
         calls = docker_calls(log)
         gate = next(i for i, c in enumerate(calls) if any('result=db.scheduler.update_one' in x for x in c))
         stop = next(i for i, c in enumerate(calls) if 'stop' in c)
@@ -420,7 +574,7 @@ def test_stopped_stack_can_be_updated_without_a_running_api(installation):
     root, env, log, run = installation
     assert run('install').returncode == 0
     log.write_text('')
-    assert run('update', FAKE_RELEASE='b'*40, FAKE_RUNNING='0').returncode == 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_RUNNING='0').returncode == 0
     assert (root/'.state/current').read_text().strip() == 'b'*40
     assert not any(any('result=db.scheduler.update_one' in x for x in call) for call in docker_calls(log))
 
@@ -451,7 +605,7 @@ def test_components_update_rebuilds_current_source_only_and_pins_images(installa
     images = [json.loads(line) for line in Path(str(log)+'.images').read_text().splitlines()]
     assert images[-1][1:] == [tag, 'mongo@sha256:'+'b'*64]
     # Ordinary same-commit updates keep the refreshed images.
-    assert run('update').returncode == 0
+    assert run('update', FAKE_PUBLISHED=CURRENT_STABLE_RELEASE).returncode == 0
     assert (root/'.state'/('image-'+'a'*40)).read_text().strip() == tag
 
 
@@ -495,7 +649,7 @@ def test_installer_sets_up_request_only_systemd_host_agent(installation):
     systemctl=Path(env['PATH'].split(os.pathsep)[0])/'systemctl'
     systemctl.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG.systemd"\n')
     systemctl.chmod(0o755)
-    result=run('install', OFF_PROXY_DISABLE_HOST_AGENT='0', OFF_PROXY_TEST_SYSTEMD='1', OFF_PROXY_SERVICE_DIR=str(service_dir))
+    result=run('install', OFF_PROXY_DISABLE_HOST_AGENT='0', OFF_PROXY_SERVICE_DIR=str(service_dir))
     assert result.returncode == 0, result.stderr
     units=list(service_dir.glob('*.service'))
     assert len(units)==1
@@ -520,5 +674,5 @@ def test_manifest_transports_future_modules_without_updater_changes(installation
         for name,body in files.items():
             entry=tarfile.TarInfo(name);entry.size=len(body);entry.mode=0o644
             target.addfile(entry,io.BytesIO(body))
-    assert run('update',FAKE_RELEASE='b'*40).returncode == 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE).returncode == 0
     assert (root/'releases'/('b'*40)/'server'/'future_runtime.py').is_file()

@@ -93,7 +93,7 @@ def open_https(request):
 
 
 def json_url(url, headers=None):
-    request = urllib.request.Request(url, headers={'User-Agent': 'OFF-Proxy-Server/0.1.11', **(headers or {})})
+    request = urllib.request.Request(url, headers={'User-Agent': 'OFF-Proxy-Server/1.0.0', **(headers or {})})
     with open_https(request) as response:
         if not response.url.startswith('https://'):
             raise ValueError('HTTPS required')

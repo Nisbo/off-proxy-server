@@ -60,22 +60,29 @@ Vollimport müssen beide Bestände gleichzeitig Platz finden. Dazu kommen
 Images, Sicherungen und Wachstum. Bei der gemessenen Größe waren 80–100 GiB
 freier Speicher eine sinnvolle Reserve.
 
-## Zugriff über LAN oder VPN
+## Netzwerkzugriff
 
-1. Ermittle die LAN- oder VPN-IP des Linux-Systems, auf dem Docker läuft.
-   In der Konsole zeigt `ip -br -4 addr show scope global` die IPv4-Adressen.
-   Verwende die Adresse der Netzwerkschnittstelle deiner VM oder deines
-   Containers, zum Beispiel `eth0`.
-2. Öffne als `root` die Datei `/opt/off-proxy-server/.env`. Ändere die Zeile
-   `BIND_IP=127.0.0.1` auf deine IP, zum Beispiel `BIND_IP=192.168.1.50`.
-   Speichere die Datei und führe `off-proxy start` aus, während kein Import läuft.
-3. Öffne die IP mit Port `8097` im Browser, zum Beispiel
-   `http://192.168.1.50:8097/`, und melde dich mit dem bei der Installation
-   festgelegten Passwort an.
+Der Installer fragt nach einem Passwort (8–256 Zeichen) und bietet danach drei Optionen.
 
-Falls du bei der Installation kein Passwort eingegeben hast, lege es in der
-Shell als `root` mit `off-proxy password` fest (8–256 Zeichen).
-Für Zugriff über eine Domain nutze HTTPS am Reverse Proxy.
+- **Alle IPv4-Adressen** ist voreingestellt. Damit sind Weboberfläche und API
+  über alle IPv4-Schnittstellen erreichbar, auch über öffentliche, falls die
+  Firewall den Port freigibt.
+- **Bestimmte Adressen** wählst du über die angezeigten Nummern. Für mehrere
+  Adressen gib die Nummern mit Leerzeichen getrennt ein.
+- **Nur lokal** bindet an `127.0.0.1`, etwa für einen Reverse Proxy auf
+  demselben System.
+
+Öffne einen der Browser-Links, die der Installer ausgibt. Läuft die Installation
+ohne interaktives Terminal, bleibt der Zugriff lokal. Führe danach als `root`
+`off-proxy password` aus, um das Passwort festzulegen und die Adressen auszuwählen.
+
+Mit `off-proxy bind` kannst du die Auswahl später als `root` ändern. Ohne
+interaktives Terminal zeigt der Befehl die aktuelle Bindung und die Links an.
+Für eine direkte Änderung nutze `off-proxy bind all`, `off-proxy bind local`
+oder zum Beispiel `off-proxy bind 192.168.1.50 10.0.0.50`. Bei einer Änderung
+startet der laufende Webdienst kurz neu. Updates übernehmen die gewählten Adressen.
+Verwaltungsbefehle aus älteren Versionen unterstützen nur die erste
+ausgewählte Adresse. Für Zugriff über eine Domain nutze HTTPS am Reverse Proxy.
 
 ## Updates und Rollback
 
@@ -104,13 +111,17 @@ Beta-Pre-Releases verwenden `v0.2.0-beta.1`. Der Tag muss zur `VERSION`-Datei pa
 | `off-proxy logs` | Abgleich-Logs verfolgen |
 | `off-proxy test 4062139025398 all` | Barcode über alle Bestände abfragen |
 | `off-proxy password` | GUI-Passwort festlegen oder zurücksetzen |
-| `off-proxy update` | Neuesten Commit von `main` installieren |
+| `off-proxy bind` | Adressen für Weboberfläche und API anzeigen oder ändern |
+| `off-proxy update` | Neuestes veröffentlichtes stabiles Release installieren |
 | `off-proxy update beta` | Neuestes veröffentlichtes Beta-Release installieren |
 | `off-proxy update beta --head` | Neuesten Commit von `beta` installieren |
 | `off-proxy components-update` | Installierten Programmstand mit neuen Container-Komponenten aufbauen |
 | `off-proxy rollback` | Vorherige lokal gespeicherte Programmversion starten |
 | `off-proxy stop` / `off-proxy start` | Dienste stoppen oder starten |
 | `off-proxy down` | Projektcontainer und Netzwerke entfernen, Daten behalten |
+
+Ohne veröffentlichtes Release im gewählten Kanal meldet der Updater, dass
+kein Release verfügbar ist. Die Installation bleibt dabei unverändert.
 
 ### Container-Komponenten
 
@@ -185,14 +196,16 @@ Ein einfacher Test auf dem Server nutzt den aktuellen Schlüssel automatisch:
 off-proxy test 0000527000057 beauty
 ```
 
-Für curl den aktuellen Schlüssel aus der GUI kopieren und verdeckt eingeben:
+Für die curl-Abfrage verwende den Browser-Link aus der Installation oder aus
+`off-proxy bind`. Kopiere den aktuellen API-Schlüssel aus der Weboberfläche.
 
 ```sh
+read -r -p 'Browser-Adresse: ' BASE_URL
 read -r -s -p 'Aktueller API-Schlüssel: ' TOKEN
 printf '\n'
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:8097/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url'
-unset TOKEN
+  "${BASE_URL%/}/api/v3/product/4062139025398.json?product_type=all&lc=de&fields=code,product_name,product_name_de,brands,quantity,image_front_thumb_url"
+unset TOKEN BASE_URL
 ```
 
 | Parameter | Unterstützte Werte |
@@ -249,8 +262,9 @@ getrennt testen. Software-Rollback ersetzt keine Datensicherung.
 - Delta-Lücke: Fortsetzen/Pausieren wählen; Vollimport zu einem passenden Zeitpunkt bestätigen.
 - Nach Update: Browserseite neu laden. Schlüsselwechsel benötigen keinen Neustart.
 
-Zum Entfernen der Dienste `off-proxy down`. Verzeichnisse nur löschen, wenn auch
-ihre Daten entfernt werden sollen. Es gibt kein globales Docker-Prune und keine
+`off-proxy down` entfernt die Projektcontainer und Netzwerke. Der systemd-Helfer
+bleibt installiert und aktiviert. Verzeichnisse nur löschen, wenn auch ihre
+Daten entfernt werden sollen. Es gibt kein globales Docker-Prune und keine
 Bereinigung fremder Images. Aufbewahrte Anwendungsimages und Quellen erlauben Rollback.
 
 ## Entwicklung und Prüfungen
