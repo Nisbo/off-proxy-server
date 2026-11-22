@@ -13,6 +13,8 @@ Unterstützt wird die Produktabfrage per Barcode, nicht die komplette OFF-API.
 Namenssuche, Produktbearbeitung, öffentliche GUI-Suche und automatisches Nachladen
 unbekannter Produkte fehlen noch. Die Anbindung an HA List Manager ist noch nicht enthalten.
 
+![Deutsche Oberfläche des OFF Proxy Servers mit Bestandsstatistik, Synchronisierungsstatus und Barcode-Suche](docs/images/dashboard-de.png)
+
 ## Voraussetzungen
 
 - Linux, Bash, Docker mit Docker Compose v2, curl, tar und util-linux (`flock`).

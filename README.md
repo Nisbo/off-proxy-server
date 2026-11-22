@@ -12,6 +12,8 @@ The project provides product-by-barcode lookups, not the entire OFF API.
 It currently has no name search, product editing, public dashboard search or
 online fallback for unknown products. HA List Manager integration is not yet included.
 
+![OFF Proxy Server dashboard in English with dataset statistics, synchronization status and barcode lookup](docs/images/dashboard-en.png)
+
 ## Before installing
 
 - Linux, Bash, Docker Engine with Docker Compose v2, curl, tar and util-linux (`flock`).
