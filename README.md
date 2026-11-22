@@ -12,9 +12,10 @@ barcode from the dashboard or a compatible application.
 
 ## Quick start
 
-1. Use a Linux host with Bash, Docker Compose v2, curl, tar and flock. Review the
-   [disk, memory and CPU requirements](docs/guide.md#requirements).
-2. Run the installer as root. It uses the latest published stable release.
+1. You need a Linux machine with Docker. If Docker is missing, follow the
+   [Docker setup instructions](docs/guide.md#set-up-docker).
+2. Open a terminal as an administrator (`root`) on the server. The command below
+   installs the latest published stable release.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh -o off-proxy-install.sh && bash off-proxy-install.sh

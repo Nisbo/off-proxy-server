@@ -4,10 +4,53 @@
 
 ## Requirements
 
-Use a Linux host with Bash, Docker Engine with Docker Compose v2, curl, tar and
-flock. Install and manage the service as root. The application runs as an
-unprivileged user in its containers. MongoDB has no published host port.
+You need a Linux machine and a terminal with administrator permissions
+(`root`). If you are signed in as a regular user with `sudo` access, use
+`sudo -i` to open a root terminal.
+
+The installer uses Bash and three small Linux tools. `curl` downloads files,
+`tar` extracts them, and `flock` prevents two installations or updates from
+running at the same time. If any of these are missing on Debian or Ubuntu,
+install the packages as root:
+
+```sh
+apt update && apt install bash curl tar util-linux
+```
+
+[`flock` comes with the `util-linux` package.](https://packages.debian.org/trixie/amd64/util-linux/filelist)
+
+### Set up Docker
+
+Install Docker before running the OFF Proxy installer. Docker Compose starts
+OFF Proxy and its MongoDB database together.
+
+On a **fresh test machine** that needs Docker, you can download and run
+Docker's official convenience script as root in one line.
+[Docker's installation script guide](https://docs.docker.com/engine/install/debian/#install-using-the-convenience-script)
+
+```sh
+curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh
+```
+
+For a long-running server, Docker recommends installing from its package
+repository. [Debian](https://docs.docker.com/engine/install/debian/#install-using-the-apt-repository) · [Ubuntu](https://docs.docker.com/engine/install/ubuntu/#install-using-the-apt-repository)
+
+If Docker is already installed or you have just set it up, check from
+the terminal:
+
+```sh
+docker compose version
+```
+
+A version number tells you Compose is available. If Docker is present but
+the `compose` command is missing, install the Compose plugin.
+[Docker Compose plugin guide](https://docs.docker.com/compose/install/linux/)
+
 A systemd host service enables program and component updates from the dashboard.
+The application runs as an unprivileged user in its containers. MongoDB has no
+published host port.
+
+### Storage and hardware
 
 MongoDB 8 requires a supported CPU and AVX on x86-64. A starting point is two CPU
 cores and 2–4 GiB of available RAM. A deployment with about five million products

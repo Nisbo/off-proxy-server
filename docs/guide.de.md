@@ -4,10 +4,53 @@
 
 ## Voraussetzungen
 
-Nutze einen Linux-Host mit Bash, Docker Engine mit Docker Compose v2, curl, tar
-und flock. Installation und Verwaltung erfolgen als root. In den Containern
-läuft die Anwendung ohne Root-Rechte. MongoDB veröffentlicht keinen Host-Port.
+Du brauchst einen Linux-Rechner und ein Terminal mit Administratorrechten
+(`root`). Wenn du als normaler Benutzer angemeldet bist und `sudo` verwenden
+kannst, öffne mit `sudo -i` ein solches Terminal.
+
+Der Installer nutzt Bash und drei kleine Linux-Werkzeuge. `curl` lädt Dateien
+herunter, `tar` entpackt sie und `flock` verhindert, dass zwei Installationen
+oder Updates gleichzeitig laufen. Falls etwas fehlt, installiere auf Debian
+oder Ubuntu die nötigen Pakete als root:
+
+```sh
+apt update && apt install bash curl tar util-linux
+```
+
+[`flock` gehört zum Paket `util-linux`.](https://packages.debian.org/trixie/amd64/util-linux/filelist)
+
+### Docker einrichten
+
+Docker muss installiert sein, bevor du den OFF-Proxy-Installer startest.
+Docker Compose startet den OFF Proxy und seine MongoDB gemeinsam.
+
+Auf einem **frischen Testrechner**, auf dem Docker noch fehlt, kannst du das
+offizielle Docker-Skript als root mit einem Einzeiler herunterladen und starten.
+[Docker-Dokumentation zum Installationsskript](https://docs.docker.com/engine/install/debian/#install-using-the-convenience-script)
+
+```sh
+curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh
+```
+
+Für einen dauerhaft genutzten Server empfiehlt Docker die Installation über
+sein Paket-Repository. [Debian](https://docs.docker.com/engine/install/debian/#install-using-the-apt-repository) · [Ubuntu](https://docs.docker.com/engine/install/ubuntu/#install-using-the-apt-repository)
+
+Wenn Docker schon installiert ist oder du es gerade eingerichtet hast, prüfe
+im Terminal:
+
+```sh
+docker compose version
+```
+
+Erscheint eine Versionsnummer, ist Compose verfügbar. Wenn Docker installiert
+ist, aber der Befehl `compose` fehlt, ergänze das Compose-Plugin.
+[Docker-Anleitung zum Compose-Plugin](https://docs.docker.com/compose/install/linux/)
+
 Ein systemd-Host-Dienst ermöglicht Programm- und Komponenten-Updates über die GUI.
+In den Containern läuft die Anwendung ohne Root-Rechte. MongoDB veröffentlicht
+keinen Host-Port.
+
+### Speicher und Hardware
 
 MongoDB 8 setzt eine geeignete CPU und bei x86-64 AVX voraus. Ein Ausgangspunkt
 sind zwei CPU-Kerne und 2–4 GiB freier RAM. In einer Installation mit rund fünf

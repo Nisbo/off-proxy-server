@@ -12,9 +12,10 @@ Products Facts für die Suche im Dashboard oder per API bereit.
 
 ## Schnellstart
 
-1. Nutze einen Linux-Host mit Bash, Docker Compose v2, curl, tar und flock.
-   Beachte die [Anforderungen an Speicher und CPU](docs/guide.de.md#voraussetzungen).
-2. Führe den Installer als root aus. Er verwendet das neueste veröffentlichte stabile Release.
+1. Du brauchst einen Linux-Rechner mit Docker. Falls Docker fehlt, findest du den
+   [Installationsbefehl in der Anleitung](docs/guide.de.md#docker-einrichten).
+2. Öffne auf dem Server ein Terminal als Administrator (`root`). Der folgende Befehl
+   installiert das neueste veröffentlichte stabile Release.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh -o off-proxy-install.sh && bash off-proxy-install.sh
