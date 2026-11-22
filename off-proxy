@@ -50,12 +50,17 @@ version_for() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || die 'Invalid source VERSION.'
   printf '%s' "$version"
 }
+runtime_source() {
+  if [[ -d $1/server ]]; then printf '%s/server' "$1"; else printf '%s' "$1"; fi
+}
+
 compose_images() {
-  local source=$1 image_tag=$2 mongo_image=$3; shift 3
-  OFF_PROXY_SOURCE_DIR=$source OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
+  local source=$1 image_tag=$2 mongo_image=$3 program; shift 3
+  program=$(runtime_source "$source")
+  OFF_PROXY_SOURCE_DIR=$program OFF_PROXY_IMAGE_TAG=$image_tag OFF_PROXY_MONGO_IMAGE=$mongo_image OFF_PROXY_PYTHON_IMAGE=${PYTHON_IMAGE_OVERRIDE:-python:3.13-slim} \
   OFF_PROXY_PROGRAM_COMMIT=${source##*/} \
     docker compose --project-directory "$RUNTIME" --env-file "$ROOT/.env" \
-      -p "$PROJECT" -f "$source/compose.yaml" "$@"
+      -p "$PROJECT" -f "$program/compose.yaml" "$@"
 }
 image_tag_for() {
   local release
@@ -131,13 +136,15 @@ validate_runtime_list() {
   (( count > 0 ))
 }
 runtime_complete() {
-  local source=$1 name
-  validate_runtime_list "$source" || return 1
-  for name in app.py VERSION compose.yaml Dockerfile .dockerignore requirements.txt off-proxy runtime-files.txt; do
-    [[ -f $source/$name ]] || return 1
+  local source=$1 program name
+  program=$(runtime_source "$source")
+  [[ ! -L $program && ! -L $program/web ]] || return 1
+  validate_runtime_list "$program" || return 1
+  for name in VERSION off-proxy; do
+    [[ -f $source/$name && ! -L $source/$name ]] || return 1
   done
-  for name in index.html dashboard.js dashboard.css; do
-    [[ -f $source/web/$name ]] || return 1
+  for name in app.py compose.yaml Dockerfile .dockerignore requirements.txt runtime-files.txt web/index.html web/dashboard.js web/dashboard.css; do
+    [[ -f $program/$name && ! -L $program/$name ]] || return 1
   done
 }
 
@@ -160,17 +167,22 @@ fetch_release() {
     tar -xzf "$TEMP/source.tar.gz" --no-same-owner --no-same-permissions \
       --strip-components=1 -C "$TEMP/source"
     version_for "$TEMP/source" >/dev/null
-    mkdir "$TEMP/runtime"
-    local name
+    local name program target="$TEMP/runtime"
     runtime_complete "$TEMP/source" || die 'Incomplete or invalid source archive. Existing services unchanged.'
+    program=$(runtime_source "$TEMP/source")
+    if [[ $program == "$TEMP/source/server" ]]; then target="$target/server"; fi
+    mkdir -p "$target/web"
+    for name in VERSION off-proxy; do
+      install -m 644 "$TEMP/source/$name" "$TEMP/runtime/$name"
+    done
     while IFS= read -r name || [[ -n $name ]]; do
-      cp -p "$TEMP/source/$name" "$TEMP/runtime/$name"
-      # Extraction uses umask 077; public code must remain readable inside non-root images.
-      chmod 644 "$TEMP/runtime/$name"
-    done < "$TEMP/source/runtime-files.txt"
-    [[ -f $TEMP/source/web/index.html && -f $TEMP/source/web/dashboard.js && -f $TEMP/source/web/dashboard.css ]] || die 'Incomplete web assets.'
-    cp -Rp "$TEMP/source/web" "$TEMP/runtime/web"
-    chmod -R u=rwX,go=rX "$TEMP/runtime/web"
+      install -m 644 "$program/$name" "$target/$name"
+    done < "$program/runtime-files.txt"
+    for name in index.html dashboard.js dashboard.css; do
+      install -m 644 "$program/web/$name" "$target/web/$name"
+    done
+    # The staging directory is private, while Docker reads code as a non-root user.
+    chmod 755 "$target" "$target/web"
     [[ ! -f $TEMP/source/LICENSE ]] || cp -p "$TEMP/source/LICENSE" "$TEMP/runtime/LICENSE"
     runtime_complete "$TEMP/runtime" || die 'Incomplete runtime manifest. Existing services unchanged.'
     # Old updaters may have cached a release without newly introduced modules.
@@ -306,7 +318,7 @@ update_program() {
 components_update() {
   local source release old_tag old_mongo mongo_container next_tag next_mongo python_base result=0
   source=$(current_source); release=$(basename "$source")
-  [[ $release != legacy && -f $source/security.py ]] || die 'Run off-proxy update first.'
+  [[ $release != legacy && -f $(runtime_source "$source")/security.py ]] || die 'Run off-proxy update first.'
   check_import_idle "$source"
   old_tag=$(image_tag_for "$source")
   # Pin the actual local database image before pulling its moving 8.0 tag.
@@ -374,7 +386,7 @@ install_host_agent() {
     printf 'GUI component actions need systemd / GUI-Komponentenaktionen benötigen systemd. CLI remains available.\n'; return 0;
   }
   unit=$(agent_unit)
-  if [[ ! -f $(current_source)/components.py ]]; then
+  if [[ ! -f $(runtime_source "$(current_source)")/components.py ]]; then
     systemctl disable --now "$unit" >/dev/null 2>&1 || true
     return 0
   fi

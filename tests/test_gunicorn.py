@@ -37,7 +37,7 @@ TestServer().run()
     log = (root/'server.log').open('w')
     source = Path(__file__).resolve().parents[1]
     process = subprocess.Popen([sys.executable,str(runner)], cwd=source,
-        env=dict(os.environ, PYTHONPATH=str(source)), stdout=log, stderr=log)
+        env=dict(os.environ, PYTHONPATH=str(source / "server")), stdout=log, stderr=log)
     client = Client(f'http://127.0.0.1:{port}')
     try:
         for _ in range(100):

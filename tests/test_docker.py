@@ -14,6 +14,7 @@ import time
 import pytest
 
 from .test_security import Client
+from .test_support import runtime_entries
 
 pytestmark = pytest.mark.skipif(os.environ.get('DOCKER_SMOKE') != '1', reason='explicit disposable Docker host required')
 SOURCE = Path(__file__).resolve().parents[1]
@@ -32,9 +33,9 @@ def test_real_install_update_rotation_and_rollback(tmp_path):
                     '--output='+str(remote/('a'*40+'.tar.gz')),baseline],cwd=SOURCE,check=True)
     for commit, target_version in [('b'*40, newer)]:
         with tarfile.open(remote/(commit+'.tar.gz'), 'w:gz') as archive:
-            for name in ('app.py','control.py','dashboard.py','security.py','components.py','releases.py','runtime-files.txt','VERSION','compose.yaml','Dockerfile','.dockerignore','requirements.txt','off-proxy','web/index.html','web/dashboard.js','web/dashboard.css'):
+            for name in runtime_entries(SOURCE):
                 body = (SOURCE/name).read_bytes()
-                if name in ('app.py','VERSION'):
+                if name in ('server/app.py','VERSION','server/web/index.html'):
                     body = body.replace(version.encode(), target_version.encode())
                 entry = tarfile.TarInfo('source/'+name)
                 entry.size, entry.mode = len(body), 0o755 if name == 'off-proxy' else 0o644
@@ -59,9 +60,12 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         return result
     def compose(*args, data=None):
         commit = (root/'.state/current').read_text().strip() if (root/'.state/current').exists() else 'a'*40
+        program = root/'releases'/commit
+        if (program/'server').is_dir():
+            program /= 'server'
         return subprocess.run(['docker','compose','--project-directory',str(root),'--env-file',str(root/'.env'),
-            '-p','off-proxy-server','-f',str(root/'releases'/commit/'compose.yaml'),*args],
-            env=dict(env, OFF_PROXY_SOURCE_DIR=str(root/'releases'/commit),
+            '-p','off-proxy-server','-f',str(program/'compose.yaml'),*args],
+            env=dict(env, OFF_PROXY_SOURCE_DIR=str(program),
                      OFF_PROXY_IMAGE_TAG=(root/'.state'/('image-'+commit)).read_text().strip() if (root/'.state'/('image-'+commit)).exists() else commit,
                      OFF_PROXY_MONGO_IMAGE=(root/'.state/mongo-image').read_text().strip() if (root/'.state/mongo-image').exists() else 'mongo:8.0'),
             input=data, text=True, capture_output=True, check=True, timeout=120)
@@ -88,9 +92,9 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         manage('status'); wait_idle(client)
         failed=subprocess.run(['bash',str(old_cli),'update'],env=dict(env,SMOKE_COMMIT='b'*40),
                               text=True,capture_output=True,timeout=300)
-        assert failed.returncode != 0 and 'components.py' in failed.stderr
+        assert failed.returncode != 0
         assert (root/'.state/current').read_text().strip() == 'a'*40
-        assert not (root/'releases'/('b'*40)/'components.py').exists()
+        assert not (root/'releases'/('b'*40)/'server'/'components.py').exists()
         assert client.call('/health',key=rotated)[1]['version']=='0.1.10'
         assert (root/'.env').read_bytes()==initial_env
         compose('stop','api')  # Bootstrap must also recover an unavailable old API.

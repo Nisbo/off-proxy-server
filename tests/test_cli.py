@@ -9,6 +9,8 @@ import tarfile
 
 import pytest
 
+from .test_support import runtime_entries
+
 SOURCE = Path(__file__).resolve().parents[1]
 
 
@@ -80,7 +82,7 @@ sys.exit(0)
 
     def archive(release, version=None):
         with tarfile.open(remote / (release + ".tar.gz"), "w:gz") as tar:
-            for name in ("app.py", "dashboard.py", "control.py", "security.py", "components.py", "releases.py", "runtime-files.txt", "web/index.html", "web/dashboard.css", "web/dashboard.js", "VERSION", "compose.yaml", "Dockerfile", ".dockerignore", "requirements.txt", "off-proxy", "tests/test_app.py", "requirements-dev.txt", ".github/workflows/test.yml"):
+            for name in (*runtime_entries(SOURCE), "tests/test_app.py", "tests/requirements-dev.txt", ".github/workflows/test.yml"):
                 data = (version+"\n").encode() if name == "VERSION" and version else (SOURCE / name).read_bytes()
                 info = tarfile.TarInfo("off-proxy-server-" + release + "/" + name)
                 info.size = len(data)
@@ -287,13 +289,13 @@ def test_runtime_install_excludes_tests_and_development_files(installation):
     assert run('install').returncode == 0
     source = root/'releases'/('a'*40)
     assert not (source/'tests').exists()
-    assert not (source/'requirements-dev.txt').exists()
     assert not (source/'.github').exists()
-    assert (source/'security.py').is_file()
+    program = source/'server'
+    assert (program/'security.py').is_file()
     for module in ('app.py','security.py','control.py','dashboard.py'):
-        assert (source/module).stat().st_mode & 0o044 == 0o044
-    assert (source/'web/index.html').stat().st_mode & 0o044 == 0o044
-    assert (source/'web').stat().st_mode & 0o011 == 0o011
+        assert (program/module).stat().st_mode & 0o044 == 0o044
+    assert (program/'web/index.html').stat().st_mode & 0o044 == 0o044
+    assert (program/'web').stat().st_mode & 0o011 == 0o011
 
 
 def test_bootstrap_pins_cli_and_archive_to_one_commit(installation):
@@ -503,18 +505,55 @@ def test_actual_010_updater_failure_is_repaired_by_bootstrap(installation):
     old=historical_updater(root.parent)
     result=subprocess.run(['bash',str(old),'update'],env=dict(env,FAKE_RELEASE='b'*40),capture_output=True,text=True)
     assert result.returncode != 0
-    assert 'components.py' in result.stderr
     incomplete=root/'releases'/('b'*40)
-    assert incomplete.is_dir() and not (incomplete/'components.py').exists()
+    assert not (incomplete/'server'/'components.py').exists()
     assert (root/'.state/current').read_text().strip() == 'a'*40
     assert (root/'.env').read_bytes()==before
     result=subprocess.run(['bash',str(SOURCE/'install.sh')],env=dict(env,FAKE_RELEASE='b'*40),capture_output=True,text=True)
     assert result.returncode == 0, result.stdout+result.stderr
-    assert (incomplete/'components.py').is_file()
-    assert (incomplete/'runtime-files.txt').is_file()
+    assert (incomplete/'server'/'components.py').is_file()
+    assert (incomplete/'server'/'runtime-files.txt').is_file()
     assert (root/'.state/current').read_text().strip() == 'b'*40
     assert (root/'.env').read_bytes()==before
     assert run('update', FAKE_RELEASE='b'*40).returncode == 0
+
+
+def test_flat_019_install_migrates_once_and_supports_rollback(installation):
+    root, env, log, run = installation
+    flat_commit = "e92cffac4d271d53933f6c0b659aa27664d2e3e5"
+    old_cli = root.parent / "off-proxy-0.1.19"
+    archive = Path(env["FAKE_REMOTE"]) / ("a"*40+".tar.gz")
+    result = subprocess.run(["git", "archive", "--format=tar.gz", "--prefix=source/",
+                             f"--output={archive}", flat_commit], cwd=SOURCE, capture_output=True)
+    if result.returncode:
+        pytest.skip("Historical updater requires repository history (CI fetch-depth: 0)")
+    old_cli.write_bytes(subprocess.check_output(["git", "show", flat_commit+":off-proxy"], cwd=SOURCE))
+    installed = subprocess.run(["bash", str(old_cli), "install"], env=env, capture_output=True, text=True)
+    assert installed.returncode == 0, installed.stderr
+    assert (root/"releases"/("a"*40)/"app.py").is_file()
+    with (root/".env").open("a") as config:
+        config.write("PORT=9999\n")
+    settings = (root/".env").read_bytes()
+    (root/"data"/"probe").write_bytes(b"existing product data")
+    (root/"configdb"/"probe").write_bytes(b"existing MongoDB config")
+    failed = subprocess.run(["bash", str(old_cli), "update"], env=dict(env, FAKE_RELEASE="b"*40),
+                            capture_output=True, text=True)
+    assert failed.returncode != 0
+    assert (root/".state/current").read_text().strip() == "a"*40
+
+    updated = subprocess.run(["bash", str(SOURCE/"install.sh"), str(root)], env=dict(env, FAKE_RELEASE="b"*40),
+                             capture_output=True, text=True)
+    assert updated.returncode == 0, updated.stderr+updated.stdout
+    assert (root/".state/current").read_text().strip() == "b"*40
+    assert (root/".state/previous").read_text().strip() == "a"*40
+    assert (root/"releases"/("b"*40)/"server/app.py").is_file()
+    assert (root/".env").read_bytes() == settings
+    assert (root/"data"/"probe").read_bytes() == b"existing product data"
+    assert (root/"configdb"/"probe").read_bytes() == b"existing MongoDB config"
+    assert run("update", FAKE_RELEASE="b"*40).returncode == 0
+    assert run("rollback").returncode == 0
+    assert (root/".state/current").read_text().strip() == "a"*40
+    assert (root/".env").read_bytes() == settings
 
 
 def test_manifest_transports_future_modules_without_updater_changes(installation):
@@ -524,11 +563,11 @@ def test_manifest_transports_future_modules_without_updater_changes(installation
     with tarfile.open(archive,'r:gz') as source:
         files={m.name:source.extractfile(m).read() for m in source if m.isfile()}
     prefix='off-proxy-server-'+('b'*40)+'/'
-    files[prefix+'runtime-files.txt']+=b'future_runtime.py\n'
-    files[prefix+'future_runtime.py']=b'"""Future runtime module."""\n'
+    files[prefix+'server/runtime-files.txt']+=b'future_runtime.py\n'
+    files[prefix+'server/future_runtime.py']=b'"""Future runtime module."""\n'
     with tarfile.open(archive,'w:gz') as target:
         for name,body in files.items():
             entry=tarfile.TarInfo(name);entry.size=len(body);entry.mode=0o644
             target.addfile(entry,io.BytesIO(body))
     assert run('update',FAKE_RELEASE='b'*40).returncode == 0
-    assert (root/'releases'/('b'*40)/'future_runtime.py').is_file()
+    assert (root/'releases'/('b'*40)/'server'/'future_runtime.py').is_file()

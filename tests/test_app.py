@@ -332,7 +332,7 @@ def test_lookup_actual_export_codes_longer_than_32_characters(http, db, code):
 
 def test_build_context_excludes_database_and_secrets():
     from pathlib import Path
-    assert Path(".dockerignore").read_text().splitlines() == [
+    assert Path("server/.dockerignore").read_text().splitlines() == [
         "*", "!app.py", "!dashboard.py", "!control.py", "!security.py", "!components.py", "!releases.py", "!Dockerfile", "!requirements.txt", "!web/", "!web/**"]
 
 
@@ -350,7 +350,7 @@ def test_invalid_or_unsupported_requests(http, path):
 
 
 def test_compose_only_api_port_is_published():
-    with open("compose.yaml") as file:
+    with open("server/compose.yaml") as file:
         compose = yaml.safe_load(file)
     assert "ports" not in compose["services"]["mongo"]
     assert "127.0.0.1" in compose["services"]["api"]["ports"][0]

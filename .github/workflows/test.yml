@@ -19,13 +19,13 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
-      - run: pip install -r requirements-dev.txt
+      - run: pip install -r tests/requirements-dev.txt
       - name: Runtime dependency security audit
-        run: pip-audit -r requirements.txt
+        run: pip-audit -r server/requirements.txt
       - name: Static and shell checks
         run: |
-          ruff check app.py components.py control.py dashboard.py security.py releases.py --select F,E9
-          bandit -q app.py components.py control.py dashboard.py security.py releases.py
+          ruff check server --select F,E9
+          bandit -q -r server
           shellcheck off-proxy install.sh
       - name: Unit, local HTTP and management tests
         run: |
@@ -38,10 +38,10 @@ jobs:
       - name: Shell and Compose validation
         run: |
           bash -n off-proxy install.sh
-          docker compose --env-file .env.example config --quiet
+          docker compose --env-file server/.env.example -f server/compose.yaml config --quiet
       - name: Build application image
         run: |
-          docker build -t off-proxy-server:test .
+          docker build -t off-proxy-server:test server
           docker run --rm off-proxy-server:test python -c 'import app; import os; assert os.geteuid() == 65532; assert all((app.WEB / f).is_file() for f, _ in app.ASSETS.values()); print(app.VERSION)'
       - name: Real Docker install, update and rollback
         run: sudo -E "$(command -v python)" -m pytest -q tests/test_docker.py

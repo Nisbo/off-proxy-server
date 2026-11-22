@@ -17,3 +17,10 @@ class Server(app.Application):
         self.http.shutdown()
     def server_close(self):
         self.http.server_close()
+
+
+
+def runtime_entries(root):
+    manifest = (root / "server/runtime-files.txt").read_text().splitlines()
+    return ("off-proxy", "VERSION", *(f"server/{path}" for path in manifest),
+            "server/web/index.html", "server/web/dashboard.css", "server/web/dashboard.js")

@@ -91,6 +91,20 @@ Existing data, passwords, API keys, bindings and settings are retained.
 **Rollback restores software, not a database backup.** Returning to versions before
 0.1.7 also removes GUI protection and uses the original `.env` API key again.
 
+### One-time migration to the 0.1.20 directory layout
+
+Installations up to 0.1.19 expect program files at the root of the archive. To
+migrate, run the current installer once as root:
+
+```sh
+curl -fsSL --proto '=https' https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
+```
+
+The installer detects the existing installation and reuses its data and settings.
+For a custom installation directory, append `-s -- /path/to/installation` to
+`bash`. After the migration, use `off-proxy update` as usual. Rollback can
+also start an older locally cached version with the previous layout.
+
 ### Upgrading from 0.1.10 or earlier / missing runtime files
 
 Old management scripts copy a fixed list of runtime files. When upgrading to
@@ -105,7 +119,7 @@ It detects the existing managed installation and preserves the data directory,
 settings, password, sessions, API key and network binding. It repairs incomplete
 cached source releases. For a custom installation directory, append its path to
 `bash -s -- /your/installation`. Subsequent updates use `off-proxy update` again.
-New runtime files are listed in `runtime-files.txt` rather than a frozen list in
+New runtime files are listed in `server/runtime-files.txt` rather than a frozen list in
 the installed updater. The installer never deletes the product database.
 
 ### Program releases in the dashboard
@@ -327,7 +341,7 @@ This compatibility path is separate from the normal fresh installation.
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pip install -r tests/requirements-dev.txt
 .venv/bin/python -m pytest -q tests
 ```
 
@@ -340,7 +354,7 @@ imports. Run it only as root with `DOCKER_SMOKE=1`; it uses port 8097 and the
 `off-proxy-server` Compose project. Never run it on an installed server.
 
 CI runs these tests, coverage reporting, Ruff, Bandit, ShellCheck, Compose
-validation and image builds. Runtime dependency audit: `pip-audit -r requirements.txt`.
+validation and image builds. Runtime dependency audit: `pip-audit -r server/requirements.txt`.
 Tests and development tools remain in GitHub for reproducibility but are excluded
 from installed releases and the application image. Passing checks are not a
 promise of complete security or full OFF API compatibility.

@@ -97,6 +97,22 @@ sie nicht. Daten, Passwörter, API-Schlüssel, Bindings und Einstellungen bleibe
 Versionen vor 0.1.7 entfernt außerdem den GUI-Schutz und nutzt wieder den ursprünglichen
 API-Schlüssel aus `.env`.
 
+### Einmaliger Umstieg auf die Ordnerstruktur ab 0.1.20
+
+Bis 0.1.19 erwartet der installierte Updater die Programmdateien im Root des
+Archivs. Für den ersten Umstieg den aktuellen Installer einmal als root
+ausführen:
+
+```sh
+curl -fsSL --proto '=https' https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh | bash
+```
+
+Der Installer erkennt die bestehende Installation und verwendet ihre Daten und
+Einstellungen weiter. Bei einem eigenen Installationspfad hänge
+`-s -- /pfad/zur/installation` an `bash` an. Anschließend funktioniert
+`off-proxy update` wieder wie gewohnt. Rollback kann auch einen älteren,
+lokal gespeicherten Stand im bisherigen Format starten.
+
 ### Upgrade von 0.1.10 oder älter / fehlende Laufzeitdateien
 
 Alte Verwaltungsskripte kopieren eine feste Dateiliste. Beim Wechsel auf 0.1.11
@@ -111,7 +127,7 @@ Er erkennt die vorhandene verwaltete Installation und behält Datenverzeichnis,
 Einstellungen, Passwort, Sitzungen, API-Schlüssel und Netzwerkbindung. Unvollständige
 Quell-Caches werden repariert. Bei einem eigenen Installationsverzeichnis stattdessen
 `bash -s -- /dein/installationsverzeichnis` verwenden. Danach funktionieren Updates
-wieder mit `off-proxy update`. Neue Laufzeitdateien stehen in `runtime-files.txt`
+wieder mit `off-proxy update`. Neue Laufzeitdateien stehen in `server/runtime-files.txt`
 statt in einer unveränderlichen Liste des installierten Updaters. Die Produktdatenbank
 wird vom Installer nicht gelöscht.
 
@@ -356,7 +372,7 @@ Diese Kompatibilität ist vom normalen Einstieg für neue Installationen getrenn
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pip install -r tests/requirements-dev.txt
 .venv/bin/python -m pytest -q tests
 ```
 
@@ -369,7 +385,7 @@ wirklich aus, mit lokalen Quellarchiven und ohne OFF-Import. Nur als root mit
 Port 8097 und das Compose-Projekt `off-proxy-server`. Niemals auf dem installierten Server ausführen.
 
 CI prüft diese Abläufe, Testabdeckung, Ruff, Bandit, ShellCheck, Compose und Image-Build.
-Laufzeitabhängigkeiten prüfen: `pip-audit -r requirements.txt`. Tests und Werkzeuge
+Laufzeitabhängigkeiten prüfen: `pip-audit -r server/requirements.txt`. Tests und Werkzeuge
 bleiben für Nachvollziehbarkeit auf GitHub, gelangen aber weder in installierte
 Versionen noch ins Anwendungsimage. Erfolgreiche Prüfungen sind keine Garantie für
 vollständige Sicherheit oder volle OFF-API-Kompatibilität.

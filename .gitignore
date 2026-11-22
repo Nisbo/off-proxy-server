@@ -1,9 +1,6 @@
 .env
 .env.*
 !.env.example
-AGENTS.md
-AGENTS.local.md
-.local-safety/
 .DS_Store
 data/
 configdb/

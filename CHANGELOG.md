@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.20
+
+- EN: Move application and container files to `server/`. The bootstrap installer
+  migrates an existing installation while retaining its data, settings and rollback.
+- DE: Programm- und Containerdateien nach `server/` verschieben. Der Installer
+  übernimmt bestehende Installationen mit Daten, Einstellungen und Rollback.
+
 ## 0.1.19
 
 - EN: Keep main-branch updates in the CLI and add published beta releases and
