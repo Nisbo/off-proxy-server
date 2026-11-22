@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.15
+
+- EN: Show verified target versions for component updates and place the update
+  action above reinstallation. Confirm manual synchronization and show its
+  progress and outcome, including when there was nothing to update.
+- DE: Geprüfte Zielversionen für Komponenten-Updates anzeigen und die
+  Aktualisierung oberhalb der Neuinstallation platzieren. Manuellen Abgleich
+  bestätigen und Fortschritt und Ergebnis zeigen, auch ohne neue Daten.
+
 ## 0.1.14
 
 - EN: Resolve image URLs from both legacy and nested product-export metadata.

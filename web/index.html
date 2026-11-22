@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.14">
-  <script defer src="/assets/dashboard.js?v=0.1.14"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.15">
+  <script defer src="/assets/dashboard.js?v=0.1.15"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.14</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.15</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -40,6 +40,7 @@
       <div class="section-heading"><div><p class="eyebrow" data-i18n="live">LIVE STATUS</p><h2 id="activity-heading" data-i18n="activity">Synchronization</h2></div><span id="connection" class="badge neutral" role="status">—</span></div>
       <p id="activity-text" class="activity-text">—</p>
       <div id="activity-progress" hidden><label class="progress-label" for="job-progress"><span data-i18n="transfer">Download</span><span id="job-percent">—</span></label><progress id="job-progress" max="100"></progress><p class="muted" id="job-detail">—</p></div>
+      <p id="sync-status" class="muted" role="status" hidden></p>
       <p id="connection-error" class="error-message" role="status" hidden></p>
     </section>
     <section aria-labelledby="dataset-heading">
@@ -141,6 +142,13 @@
       <footer class="dialog-footer control-actions"><button class="secondary" id="full-cancel" type="button" data-i18n="cancel">Cancel</button><button class="primary" id="full-start" type="button" data-i18n="fullStart">Start full import</button></footer>
     </div>
   </dialog>
+  <dialog id="sync-dialog" class="control-dialog" aria-labelledby="sync-title">
+    <div class="dialog-content">
+      <header class="dialog-header"><h2 id="sync-title" data-i18n="syncTitle">Confirm data synchronization</h2><button class="secondary dialog-close" type="button" data-close="sync-dialog" aria-label="Close">×</button></header>
+      <div class="dialog-body"><p data-i18n="syncExplain"></p><p id="sync-error" class="error-message" role="status" data-i18n="controlError" hidden></p></div>
+      <footer class="dialog-footer control-actions"><button class="secondary" type="button" data-close="sync-dialog" data-i18n="cancel" autofocus>Cancel</button><button class="primary" id="sync-start" type="button" data-i18n="syncStart">Start synchronization</button></footer>
+    </div>
+  </dialog>
   <dialog id="components-dialog" class="control-dialog" aria-labelledby="components-title">
     <div class="dialog-content">
       <header class="dialog-header"><div><p class="eyebrow" data-i18n="manualOnly">MANUAL UPDATES ONLY</p><h2 id="components-title" data-i18n="componentsTitle">Program &amp; components</h2></div><button class="secondary dialog-close" type="button" data-close="components-dialog" aria-label="Close">×</button></header>
@@ -149,11 +157,11 @@
         <p id="components-state" role="status" aria-live="polite"></p>
         <p id="components-agent" class="error-message" hidden data-i18n="component_agent_unavailable">The host service is unavailable. Install it with off-proxy host-agent install.</p>
         <div id="components-rows" class="components-rows"></div>
-        <p class="muted" id="components-checked"></p>
+        <div class="components-check-row"><p class="muted" id="components-checked"></p><button class="secondary" id="components-check" type="button" data-i18n="componentsCheck">Check for updates</button></div>
+        <div class="components-maintenance"><button class="primary" id="components-update" type="button" data-i18n="componentsUpdate">Update components…</button></div>
         <section class="components-maintenance"><button class="secondary" id="components-reinstall" type="button" data-i18n="componentsReinstall">Reinstall components…</button><p class="muted" data-i18n="componentsReinstallHelp"></p></section>
         <p id="components-error" class="error-message" role="status" hidden></p>
       </div>
-      <footer class="dialog-footer control-actions"><button class="secondary" id="components-check" type="button" data-i18n="componentsCheck">Check for updates</button><button class="primary" id="components-update" type="button" data-i18n="componentsUpdate">Update components…</button></footer>
     </div>
   </dialog>
   <dialog id="components-confirm" class="control-dialog" aria-labelledby="components-confirm-title">

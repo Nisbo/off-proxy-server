@@ -51,12 +51,29 @@ def test_update_checks_compare_pinned_images_and_compatible_published_releases(d
         'mongo':{'version':'8.0.10','digest':'mongo@sha256:'+'b'*64},
         'gunicorn':{'version':'27.0.1'}}}})
     versions={'releases':{'27.0.1':[{}],'27.0.2':[{}],'27.0.3':[{'yanked':True}],'28.0.0':[{}],'27.1.0rc1':[{}]}}
-    with patch.object(components,'registry_digest',side_effect=['python@sha256:'+'a'*64,'mongo@sha256:'+'c'*64]), patch.object(components,'json_url',return_value=versions):
+    with patch.object(components,'registry_digest',side_effect=['python@sha256:'+'a'*64,'mongo@sha256:'+'c'*64]), patch.object(components,'json_url',return_value=versions), patch.object(components,'registry_version',return_value='8.0.11'):
         assert components.check(db)
     rows=components.snapshot(db)['rows']
     assert [r['state'] for r in rows] == ['current','available','available']
-    assert rows[1]['available'] == '27.0.2'
+    assert rows[1]['available_version'] == '27.0.2'
+    assert rows[2]['available_version'] == '8.0.11'
     assert components.claim(db) == ''
+
+
+@pytest.mark.parametrize('repository, tag, matching_tag, version', [
+    ('mongo', '8.0', '8.0.39', '8.0.39'),
+    ('python', '3.13-slim', '3.13.19-slim', '3.13.19'),
+])
+def test_image_target_version_must_match_the_checked_digest(repository, tag, matching_tag, version):
+    digest = 'sha256:' + 'a' * 64
+    rows = {'results': [
+        {'name': matching_tag, 'digest': 'sha256:' + 'b' * 64},
+        {'name': tag, 'digest': digest},
+    ]}
+    with patch.object(components, 'json_url', return_value=rows):
+        assert components.registry_version(repository, tag, repository+'@'+digest) is None
+        rows['results'].append({'name': matching_tag, 'digest': digest})
+        assert components.registry_version(repository, tag, repository+'@'+digest) == version
 
 
 def test_unreachable_sources_and_missing_build_provenance_are_unknown(db):

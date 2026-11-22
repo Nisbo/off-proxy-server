@@ -644,4 +644,7 @@ dialog::backdrop { background:rgb(0 0 0 / 70%); }
 
 .components-rows{display:grid;gap:14px}.component-row{padding:18px;border:1px solid var(--border,#324454);border-radius:14px}.component-row h3{margin:0 0 10px}.component-row p{margin:0 0 12px;overflow-wrap:anywhere}#components-state{overflow-wrap:anywhere}#components-check,#components-update{white-space:normal}
 
+.components-check-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:12px}
 .components-maintenance{border-top:1px solid var(--line);padding-top:18px;margin-top:20px}.components-maintenance p{margin:10px 0 0;line-height:1.5}.components-maintenance button{white-space:normal;max-width:100%}
+
+#sync-status { margin-top: 12px; }

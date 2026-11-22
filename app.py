@@ -31,7 +31,7 @@ import control
 import security
 import components
 
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",
@@ -268,6 +268,7 @@ def apply_deltas(db, kind):
     def persist():
         db.state.update_one({"_id": kind}, {"$set": {"delta_gaps": gaps}})
 
+    applied = 0
     for start, end, name in files:
         if end <= cursor and not any(start < high and end > low for low, high in gaps):
             continue
@@ -305,9 +306,11 @@ def apply_deltas(db, kind):
             "delta_cursor": cursor, "delta_gaps": gaps, "last_delta": name,
             "delta_at": timestamp(), "delta_records": count,
             "delta_unindexed_records": unindexed}})
+        applied += 1
     db.state.update_one({"_id": kind}, {"$set": {
         "phase": ("gap_paused" if pause else "partial") if gaps else "ready",
         "delta_gaps": gaps, "error": None, "checked_at": timestamp()}})
+    return applied
 
 
 def full_reasons(state, settings):
@@ -337,11 +340,12 @@ def sync_one(db, kind):
         elif not state.get("ready"):
             db.state.update_one({"_id": kind}, {"$set": {
                 "phase": "needs_full_import", "full_reasons": ["initial"]}}, upsert=True)
-            return
-        apply_deltas(db, kind)
+            return False
+        applied = apply_deltas(db, kind)
         state = db.state.find_one({"_id": kind}) or {}
         if (not imported and state.get("delta_gaps") and options["full_import_policy"] == "automatic"):
             full_import(db, kind)
+            imported = True
             apply_deltas(db, kind)
     except Exception as error:
         if approved:
@@ -350,6 +354,7 @@ def sync_one(db, kind):
     else:
         if approved:
             control.finish(db, "full:" + kind)
+        return imported or bool(applied)
     finally:
         state = db.state.find_one({"_id": kind}) or {}
         db.state.update_one({"_id": kind}, {"$set": {"full_reasons": full_reasons(state, options)}})
@@ -374,18 +379,23 @@ def sync_loop(db, once=False):
                     "error_at": timestamp()}})
                 recovering = False
             db.requests.update_one({"_id": "sync"}, {"$set": {
-                "status": "running", "started_epoch": time.time(), "error": None}}, upsert=True)
-            failed = False
+                "status": "running", "started_epoch": time.time(), "error": None},
+                "$unset": {"finished_epoch": "", "outcome": ""}}, upsert=True)
+            failed = changed = incomplete = False
             for kind in ORDER:
                 if STOP.is_set():
-                    break
+                    control.finish(db, "sync", "Synchronization interrupted")
+                    return
                 db.scheduler.update_one({"_id": "sync"}, {"$set": {
                     "active_kind": kind, "heartbeat_epoch": time.time()}})
                 try:
-                    sync_one(db, kind)
+                    changed |= bool(sync_one(db, kind))
+                    state = db.state.find_one({"_id": kind}, {"phase": 1, "full_reasons": 1}) or {}
+                    incomplete |= state.get("phase") in ("needs_full_import", "gap_paused", "partial") or bool(state.get("full_reasons"))
                 except InterruptedError:
                     db.state.update_one({"_id": kind}, {"$set": {
                         "phase": "error", "error": "Synchronization interrupted", "error_at": timestamp()}})
+                    control.finish(db, "sync", "Synchronization interrupted")
                     return
                 except Exception as error:
                     failed = True
@@ -393,7 +403,9 @@ def sync_loop(db, once=False):
                     db.state.update_one({"_id": kind}, {"$set": {
                         "phase": "error", "error": str(error)[:500],
                         "error_at": timestamp()}}, upsert=True)
-            control.finish(db, "sync", "One or more sources failed" if failed else None)
+            outcome = ("updated_incomplete" if changed else "incomplete") if incomplete else ("updated" if changed else "unchanged")
+            control.finish(db, "sync", "One or more sources failed" if failed else None,
+                           outcome=None if failed else outcome)
             finished = time.time()
             db.scheduler.update_one({"_id": "sync"}, {"$set": {
                 "phase": "idle" if once else "waiting", "active_kind": None,
@@ -751,7 +763,9 @@ class Request:
                 self.send_json(202, {"queued": components.request(self.server.db, action, reinstall=values.get("reinstall", False))})
             elif path == "/ui/settings":
                 self.send_json(200, {"settings": control.save_settings(self.server.db, values)})
-            elif path == "/ui/sync" and not values:
+            elif path == "/ui/sync":
+                if set(values) != {"confirmed"} or values.get("confirmed") is not True:
+                    raise ValueError("Synchronization requires confirmation")
                 queued = control.request(self.server.db, "sync")
                 self.send_json(202, {"queued": queued})
             elif path == "/ui/full-import":

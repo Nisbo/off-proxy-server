@@ -32,7 +32,8 @@ def request(db, job):
     # A stable unique ID makes concurrent clicks/tabs coalesce in MongoDB.
     try:
         result = db.requests.update_one({"_id": job, "status": {"$nin": ["pending", "running"]}},
-            {"$set": {"status": "pending", "requested_epoch": time.time(), "error": None}}, upsert=True)
+            {"$set": {"status": "pending", "requested_epoch": time.time(), "error": None},
+             "$unset": {"started_epoch": "", "finished_epoch": "", "outcome": ""}}, upsert=True)
         return bool(result.modified_count or result.upserted_id)
     except DuplicateKeyError:
         return False
@@ -43,9 +44,11 @@ def claim(db, job):
         {"$set": {"status": "running", "started_epoch": time.time()}}, return_document=ReturnDocument.AFTER)
 
 
-def finish(db, job, error=None):
-    db.requests.update_one({"_id": job, "status": "running"}, {"$set": {
-        "status": "failed" if error else "done", "finished_epoch": time.time(), "error": error}})
+def finish(db, job, error=None, *, outcome=None):
+    values = {"status": "failed" if error else "done", "finished_epoch": time.time(), "error": error}
+    if outcome is not None:
+        values["outcome"] = outcome
+    db.requests.update_one({"_id": job, "status": "running"}, {"$set": values})
 
 
 def merge_ranges(ranges):

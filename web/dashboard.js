@@ -12,7 +12,7 @@
       countHint: "Published dataset · metadata count", noCode: "Without barcode at full import", allCurrent: "Latest checks successful", incomplete: "Some datasets are still missing", sourceErrors: "At least one check failed", syncInProgress: "Synchronization in progress",
       idle: "The service is waiting for its next synchronization.", running: "Synchronizing: {name}", stopped: "Synchronization is stopped.", unknown: "No schedule recorded yet. The worker records it on its next run.", stale: "The worker has not reported back on time. Check the service logs.",
       afterCycle: "Scheduled after this cycle finishes", noSchedule: "Not scheduled", overdue: "Due now", inTime: "In {time}", days: "d", hours: "h", minutes: "min", seconds: "s",
-      processed: "{count} records processed", rate: "{count} records/s", unknownSize: "Total size unknown", finishing: "Download complete · finishing processing", updated: "Updated {time}",
+      processed: "{count} records processed", rate: "{count} records/s", unknownSize: "Total size unknown", finishing: "Download complete · finishing processing", updated: "Display last loaded {time}",
       lookupBusy: "Searching the local datasets…", notFound: "No product found in the selected datasets.", notReady: "Not all selected datasets are available yet. Try a specific imported dataset.", databaseError: "The database is currently unavailable.", invalid: "Enter a barcode using digits only.", requestError: "The request failed. Please try again.",
       foundTime: "Local lookup: {ms} ms", noName: "Product without a name", noValue: "Not specified", connectionError: "Status could not be refreshed. Previously loaded values may be out of date.", loading: "Connecting…"
     },
@@ -27,12 +27,26 @@
       countHint: "Veröffentlichter Bestand · Metadatenzählung", noCode: "Ohne Barcode beim Vollimport", allCurrent: "Letzte Prüfungen erfolgreich", incomplete: "Einzelne Bestände fehlen noch", sourceErrors: "Mindestens eine Prüfung fehlgeschlagen", syncInProgress: "Synchronisierung läuft",
       idle: "Der Dienst wartet auf den nächsten Abgleich.", running: "Abgleich läuft: {name}", stopped: "Die Synchronisierung ist angehalten.", unknown: "Noch kein Termin gespeichert. Der Hintergrunddienst erfasst ihn beim nächsten Lauf.", stale: "Der Hintergrunddienst hat sich nicht rechtzeitig zurückgemeldet. Bitte die Dienst-Logs prüfen.",
       afterCycle: "Wird nach diesem Durchlauf geplant", noSchedule: "Nicht geplant", overdue: "Jetzt fällig", inTime: "In {time}", days: "T", hours: "Std.", minutes: "Min.", seconds: "Sek.",
-      processed: "{count} Datensätze verarbeitet", rate: "{count} Datensätze/s", unknownSize: "Gesamtgröße unbekannt", finishing: "Download vollständig · Verarbeitung wird abgeschlossen", updated: "Aktualisiert {time}",
+      processed: "{count} Datensätze verarbeitet", rate: "{count} Datensätze/s", unknownSize: "Gesamtgröße unbekannt", finishing: "Download vollständig · Verarbeitung wird abgeschlossen", updated: "Anzeige zuletzt geladen {time}",
       lookupBusy: "Die lokalen Bestände werden durchsucht…", notFound: "Kein Produkt in den ausgewählten Beständen gefunden.", notReady: "Noch nicht alle ausgewählten Bestände sind verfügbar. Versuche einen bestimmten bereits importierten Bestand.", databaseError: "Die Datenbank ist momentan nicht erreichbar.", invalid: "Bitte einen Barcode nur aus Ziffern eingeben.", requestError: "Die Anfrage ist fehlgeschlagen. Bitte erneut versuchen.",
       foundTime: "Lokale Abfrage: {ms} ms", noName: "Produkt ohne Namen", noValue: "Nicht angegeben", connectionError: "Der Status konnte nicht aktualisiert werden. Die zuletzt geladenen Werte können veraltet sein.", loading: "Verbinde…"
     }
   };
   Object.assign(labels.en, {
+    refreshHelp: "Reloads the display with the current statistics and status.",
+    syncTitle: "Confirm data synchronization",
+    syncExplain: "The worker checks all four datasets for new delta files and imports available changes according to your settings. Full imports still follow your configured approval policy.",
+    syncStart: "Start synchronization",
+    syncWaiting: "Synchronization queued.",
+    syncRunning: "Synchronization started at {time}.",
+    syncFinished: "Synchronization finished at {time}.",
+    syncUnchanged: "Synchronization finished at {time}. Everything is up to date.",
+    syncUpdated: "Synchronization finished at {time}. Updates were applied.",
+    syncIncomplete: "Synchronization finished at {time}. Some datasets have gaps or are waiting for a full import.",
+    syncUpdatedIncomplete: "Synchronization finished at {time}. Updates were applied. Some datasets still have gaps or are waiting for a full import.",
+    syncFailed: "Synchronization ended at {time} with errors. See the dataset status for details.",
+    componentSameVersion: "New image for version {version}",
+    componentVersionUnknown: "The exact version could not be verified.",
     syncNow: "Synchronize now", settings: "Settings", save: "Save", cancel: "Cancel",
     gapPolicy: "When delta coverage is incomplete", gapContinue: "Apply available deltas", gapPause: "Pause the affected dataset",
     gapHelp: "Existing products remain available. Continuing applies newer changes but cannot recover missing changes. A returning delta can close the gap; otherwise a full import is needed.",
@@ -51,11 +65,25 @@
     needs_full_import: "Approval needed", partial: "Delta gap", gap_paused: "Updates paused",
     gapWarning: "Missing coverage: {ranges}. Existing data remains available.", gapContinuing: "Available deltas continue to be applied.", gapIsPaused: "Newer deltas are paused for this dataset.",
     fullRequired: "Full import awaits confirmation: {reasons}.", initial: "initial import", gap: "delta gap", scheduled: "refresh interval reached",
-    queued: "Queued", runningJob: "Running", syncQueued: "Synchronization requested. The background worker will process it.",
+    queued: "Queued", runningJob: "Running",
     fullQueued: "Full import confirmed and queued.", saved: "Settings saved. They apply on the next dataset check.", controlError: "Request failed. Refresh the display and try again.",
     gapOverview: "Available, with incomplete delta coverage", jobFailed: "Last request failed: {error}"
   });
   Object.assign(labels.de, {
+    refreshHelp: "Lädt die aktuellen Statistiken und Statusinformationen für die Anzeige.",
+    syncTitle: "Datenabgleich bestätigen",
+    syncExplain: "Der Hintergrunddienst prüft alle vier Bestände auf neue Delta-Dateien und übernimmt verfügbare Änderungen gemäß deinen Einstellungen. Für Vollimporte gilt weiterhin die eingestellte Bestätigungsregel.",
+    syncStart: "Abgleich starten",
+    syncWaiting: "Datenabgleich vorgemerkt.",
+    syncRunning: "Abgleich gestartet um {time}.",
+    syncFinished: "Abgleich beendet am {time}.",
+    syncUnchanged: "Abgleich beendet am {time}. Es gab nichts zu aktualisieren.",
+    syncUpdated: "Abgleich beendet am {time}. Änderungen wurden übernommen.",
+    syncIncomplete: "Abgleich beendet am {time}. Für einige Bestände fehlen Deltas oder steht ein Vollimport aus.",
+    syncUpdatedIncomplete: "Abgleich beendet am {time}. Änderungen wurden übernommen. Für einige Bestände fehlen weiterhin Deltas oder steht ein Vollimport aus.",
+    syncFailed: "Abgleich endete am {time} mit Fehlern. Details stehen bei den Beständen.",
+    componentSameVersion: "Neues Image für Version {version}",
+    componentVersionUnknown: "Die genaue Version konnte nicht ermittelt werden.",
     syncNow: "Daten jetzt abgleichen", settings: "Einstellungen", save: "Speichern", cancel: "Abbrechen",
     gapPolicy: "Bei einer Delta-Lücke", gapContinue: "Verfügbare Deltas fortsetzen", gapPause: "Betroffenen Bestand pausieren",
     gapHelp: "Vorhandene Produkte bleiben abfragbar. Beim Fortsetzen werden neuere Änderungen übernommen; fehlende Änderungen bleiben offen. Eine wieder verfügbare Delta-Datei kann die Lücke schließen, andernfalls ist ein Vollimport nötig.",
@@ -74,7 +102,7 @@
     needs_full_import: "Bestätigung erforderlich", partial: "Delta-Lücke", gap_paused: "Aktualisierung pausiert",
     gapWarning: "Fehlender Zeitraum: {ranges}. Vorhandene Daten bleiben verfügbar.", gapContinuing: "Verfügbare Deltas werden weiter eingespielt.", gapIsPaused: "Neuere Deltas sind für diesen Bestand pausiert.",
     fullRequired: "Vollimport wartet auf Bestätigung: {reasons}.", initial: "Erstimport", gap: "Delta-Lücke", scheduled: "Intervall erreicht",
-    queued: "Vorgemerkt", runningJob: "Läuft", syncQueued: "Datenabgleich angefordert. Der Hintergrunddienst übernimmt ihn.",
+    queued: "Vorgemerkt", runningJob: "Läuft",
     fullQueued: "Vollimport bestätigt und vorgemerkt.", saved: "Einstellungen gespeichert. Sie gelten ab der nächsten Bestandsprüfung.", controlError: "Anfrage fehlgeschlagen. Bitte die Anzeige aktualisieren und erneut versuchen.",
     gapOverview: "Verfügbar, mit unvollständiger Delta-Abdeckung", jobFailed: "Letzte Anforderung fehlgeschlagen: {error}"
   });
@@ -182,10 +210,15 @@
     const grid = $("components-rows");
     for (const name of ["python","gunicorn","mongo"]) {
       let item = document.getElementById(`component-${name}`);
-      if (!item) { item = document.createElement("article"); item.id = `component-${name}`; item.className="component-row"; item.innerHTML='<h3></h3><p class="muted"></p><span class="badge neutral"></span>'; grid.append(item); }
+      if (!item) { item = document.createElement("article"); item.id = `component-${name}`; item.className="component-row"; item.innerHTML='<h3></h3><p class="muted"></p><span class="badge neutral"></span><p class="muted component-target" hidden></p>'; grid.append(item); }
       const row = (state.rows || []).find(r=>r.name===name) || {}, installedVersion = state.installed?.[name]?.version || row.installed, installed = installedVersion || "—";
       item.querySelector("h3").textContent = t({python:"componentPython",gunicorn:"componentGunicorn",mongo:"componentMongo"}[name]);
-      item.querySelector("p").textContent = `${t("componentInstalled")}: ${installed}${name === "gunicorn" && installedVersion && row.available && row.available !== installedVersion ? ` → ${row.available}` : ""}`;
+      const target = row.available_version || (name === "gunicorn" ? row.available : null);
+      const versionChange = row.state === "available" && target && installedVersion && target !== installedVersion;
+      item.querySelector("p").textContent = `${t("componentInstalled")}: ${installed}${versionChange ? ` → ${target}` : ""}`;
+      const details = item.querySelector(".component-target");
+      details.hidden = row.state !== "available" || Boolean(versionChange);
+      details.textContent = target === installedVersion && target ? t("componentSameVersion", {version: target}) : target || t("componentVersionUnknown");
       badge(item.querySelector("span"), t(row.state === "available" ? "componentAvailable" : row.state === "current" ? "componentCurrent" : "componentUnknown"), row.state === "current" ? "good" : row.state === "available" ? "busy" : "neutral");
     }
   }
@@ -237,7 +270,7 @@
     setText("ready-count", `${kinds.filter(k => snapshot.datasets[k].ready).length} / 4`);
     setText("overview-state", t(snapshot.all_synced ? "allCurrent" : kinds.some(k => snapshot.datasets[k].phase === "error") ? "sourceErrors" : kinds.some(k => ["full_import", "delta_import"].includes(snapshot.datasets[k].phase)) ? "syncInProgress" : "incomplete"));
     if (kinds.some(k => snapshot.datasets[k].delta_gaps?.length)) setText("overview-state", t("gapOverview"));
-    const syncJob = snapshot.requests?.sync?.status;
+    const sync = snapshot.requests?.sync, syncJob = sync?.status;
     $("sync").disabled = controlBusy || !connected || ["pending", "running"].includes(syncJob);
     setText("sync", t(syncJob === "pending" ? "queued" : syncJob === "running" ? "runningJob" : "syncNow"));
     $("settings").disabled = !connected || controlBusy;
@@ -267,6 +300,16 @@
     }
     const schedule = snapshot.scheduler, state = snapshot.datasets[schedule.active_kind], progress = state?.progress;
     setText("activity-text", schedule.stale ? t("stale") : schedule.phase === "running" ? t("running", {name: t(schedule.active_kind || "activity")}) : t(schedule.phase === "stopped" ? "stopped" : schedule.phase === "waiting" || schedule.phase === "idle" ? "idle" : "unknown"));
+    const syncResult = {
+      unchanged: "syncUnchanged", updated: "syncUpdated", incomplete: "syncIncomplete", updated_incomplete: "syncUpdatedIncomplete"
+    };
+    const syncMessage = syncJob === "pending" ? "syncWaiting" : syncJob === "running" ? "syncRunning"
+      : syncJob === "failed" ? "syncFailed" : syncJob === "done" && sync.finished_epoch ? syncResult[sync.outcome] || "syncFinished" : null;
+    const outcome = $("sync-status");
+    const statusText = syncMessage ? t(syncMessage, {time: date(syncJob === "running" ? sync.started_epoch : sync.finished_epoch)}) : "";
+    outcome.hidden = !syncMessage;
+    outcome.className = syncJob === "failed" ? "error-message" : "muted";
+    if (outcome.textContent !== statusText) outcome.textContent = statusText;
     const showProgress = schedule.phase === "running" && !schedule.stale && state && ["full_import", "delta_import"].includes(state.phase) && progress;
     $("activity-progress").hidden = !showProgress;
     if (showProgress) {
@@ -311,6 +354,8 @@
     for (const button of document.querySelectorAll(".dialog-close")) button.setAttribute("aria-label", t("close"));
     for (const id of ["login-eye", "api-eye"]) $(id).setAttribute("aria-label", t($(id === "api-eye" ? "api-key" : "login-password").type === "password" ? "showSecret" : "hideSecret"));
     $("api-key").placeholder = t("storedKey");
+    $("refresh").title = t("refreshHelp");
+    $("refresh").setAttribute("aria-description", t("refreshHelp"));
     renderStatus(); renderLookup();
     if (fullKind) setText("full-dataset", t(fullKind));
     if (!$("connection-error").hidden) setText("connection-error", t("connectionError"));
@@ -509,8 +554,19 @@
     await componentAction("/ui/components/update", componentReinstall ? {confirmed:true,reinstall:true} : {confirmed:true});
     $("components-start").disabled=false;
   });
-  $("sync").addEventListener("click", async () => {
-    if (await sendControl("/ui/sync", {})) { controlNotice = "syncQueued"; renderStatus(); }
+  $("sync").addEventListener("click", () => {
+    $("sync-error").hidden = true;
+    $("sync-dialog").showModal();
+  });
+  $("sync-start").addEventListener("click", async () => {
+    if (controlBusy) return;
+    $("sync-start").disabled = true;
+    $("sync-error").hidden = true;
+    controlNotice = null;
+    const ok = await sendControl("/ui/sync", {confirmed: true});
+    $("sync-start").disabled = false;
+    if (ok) $("sync-dialog").close();
+    else $("sync-error").hidden = false;
   });
   $("settings").addEventListener("click", () => {
     const options = snapshot.settings;

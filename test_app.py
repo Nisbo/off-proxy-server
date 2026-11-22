@@ -637,8 +637,10 @@ def test_ui_control_requires_nonce_and_full_confirmation(http, db):
     nonce = get(http + '/ui/status', auth=False)[1]['control_nonce']
     assert post_ui(http, '/ui/sync', {})[0] == 403
     assert post_ui(http, '/ui/sync', {}, nonce, 'https://unrelated.invalid')[0] == 403
-    assert post_ui(http, '/ui/sync', {}, nonce)[1]['queued'] is True
-    assert post_ui(http, '/ui/sync', {}, nonce)[1]['queued'] is False
+    for values in ({}, {'confirmed': False}, {'confirmed': 1}, {'confirmed': True, 'extra': True}):
+        assert post_ui(http, '/ui/sync', values, nonce)[0] == 400
+    assert post_ui(http, '/ui/sync', {'confirmed': True}, nonce)[1]['queued'] is True
+    assert post_ui(http, '/ui/sync', {'confirmed': True}, nonce)[1]['queued'] is False
     assert post_ui(http, '/ui/full-import', {'kind': 'food'}, nonce)[0] == 400
     assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': False}, nonce)[0] == 400
     assert post_ui(http, '/ui/full-import', {'kind': 'food', 'confirmed': True}, nonce)[0] == 202
@@ -677,6 +679,41 @@ def test_worker_consumes_manual_request_without_second_importer(db):
     with patch.object(app, 'sync_one', side_effect=sync), patch.object(app.STOP, 'wait', side_effect=wait):
         app.sync_loop(db)
     assert calls == list(app.ORDER) * 2
+
+
+@pytest.mark.parametrize("window, expected", [
+    ((50, 100), "unchanged"), ((100, 150), "updated"), ((150, 200), "updated_incomplete"),
+])
+def test_sync_reports_real_delta_outcome(db, window, expected):
+    import control
+    from dashboard import Dashboard
+    for kind in app.PROJECTS:
+        publish(db, kind)
+    assert control.request(db, "sync")
+    start, end = window
+
+    def download(url):
+        kind = next(kind for kind in app.PROJECTS if url.startswith(app.delta_url(kind)))
+        low, high = window if kind == "food" else (50, 100)
+        if url.endswith("index.txt"):
+            return response(f"{app.PROJECTS[kind]}_products_{low}_{high}.json.gz".encode())
+        assert kind == "food" and url.endswith(f"_{start}_{end}.json.gz")
+        return response(compressed(product(version=end)))
+
+    with patch.object(app, "open_url", side_effect=download):
+        assert app.sync_loop(db, once=True) == 0
+    job = Dashboard(db, app.VERSION, app.PROJECTS).snapshot()["requests"]["sync"]
+    assert job["status"] == "done" and job["outcome"] == expected
+    assert job["started_epoch"] <= job["finished_epoch"]
+    assert control.request(db, "sync")
+    job = Dashboard(db, app.VERSION, app.PROJECTS).snapshot()["requests"]["sync"]
+    assert job == {"status": "pending", "error": None}
+
+
+def test_sync_does_not_report_no_changes_when_initial_import_is_waiting(db):
+    from dashboard import Dashboard
+    assert app.sync_loop(db, once=True) == 0
+    assert Dashboard(db, app.VERSION, app.PROJECTS).snapshot()["requests"]["sync"]["outcome"] == "incomplete"
 
 
 def test_restart_does_not_replay_interrupted_full_approval(db):

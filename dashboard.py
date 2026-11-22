@@ -94,7 +94,7 @@ class Dashboard:
             (schedule["phase"] == "waiting" and deadline and now > deadline + 120)))
         return {"version": self.version, "server_epoch": now, "datasets": datasets,
                 "settings": options,
-                "requests": {r["_id"]: {k: r[k] for k in ("status", "error") if k in r}
+                "requests": {r["_id"]: {k: r[k] for k in ("status", "error", "started_epoch", "finished_epoch", "outcome") if k in r}
                              for r in self.db.requests.find({}) if r["_id"] in ("sync", *("full:" + k for k in self.projects))},
                 "scheduler": schedule, "statistics": {k: v for k, v in stats.items() if k != "counts"},
                 "all_ready": all(s["ready"] for s in datasets.values()),

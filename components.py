@@ -80,7 +80,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def open_https(request):
     parsed = urllib.parse.urlsplit(request.full_url)
-    if (parsed.scheme != 'https' or parsed.hostname not in ('pypi.org', 'auth.docker.io', 'registry-1.docker.io')
+    if (parsed.scheme != 'https' or parsed.hostname not in ('pypi.org', 'auth.docker.io', 'registry-1.docker.io', 'hub.docker.com')
             or parsed.username or parsed.password or parsed.port not in (None, 443)):
         raise ValueError('Unsupported update source')
     return urllib.request.build_opener(NoRedirect()).open(request, timeout=15)
@@ -111,6 +111,21 @@ def registry_digest(repository, tag):
     return result
 
 
+def registry_version(repository, tag, digest):
+    """Find a versioned tag pointing at the exact image checked by the updater."""
+    series = {'python': '3.13', 'mongo': '8.0'}[repository]
+    suffix = '-slim' if tag.endswith('-slim') else ''
+    pattern = re.compile(rf'({re.escape(series)}\.[0-9]+){suffix}')
+    query = urllib.parse.urlencode({'name': series, 'page_size': 100})
+    data = json_url(f'https://hub.docker.com/v2/namespaces/library/repositories/{repository}/tags?{query}')
+    image_digest = digest.split('@', 1)[1]
+    for row in data['results']:
+        match = pattern.fullmatch(row.get('name', ''))
+        if match and row.get('digest') == image_digest:
+            return match[1]
+    return None
+
+
 def check(db):
     installed = (db.components.find_one({'_id': 'host'}) or {}).get('installed', {})
     rows = []
@@ -123,7 +138,7 @@ def check(db):
                 candidates = [v for v, files in versions.items() if re.fullmatch(r'27\.[0-9]+\.[0-9]+', v)
                               and any(not f.get('yanked') for f in files)]
                 latest = max(candidates, key=lambda v: tuple(map(int, v.split('.'))))
-                row['available'] = latest
+                row['available'] = row['available_version'] = latest
                 if current.get('version'):
                     row['state'] = 'available' if tuple(map(int, latest.split('.'))) > tuple(map(int, current['version'].split('.'))) else 'current'
             else:
@@ -131,6 +146,12 @@ def check(db):
                 row['available'] = latest
                 if current.get('digest'):
                     row['state'] = 'available' if latest != current['digest'] else 'current'
+                if row['state'] == 'available':
+                    try:
+                        row['available_version'] = registry_version(name, tag, latest)
+                    except (OSError, ValueError, KeyError, TypeError):
+                        # An unavailable version label does not invalidate a verified image update.
+                        row['available_version'] = None
         except Exception:
             # Never expose remote errors, authentication headers or command output.
             row['state'] = 'unknown'
