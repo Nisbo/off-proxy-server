@@ -22,9 +22,9 @@ barcode from the dashboard or a compatible application.
    curl -fsSL https://raw.githubusercontent.com/Nisbo/off-proxy-server/main/install.sh -o off-proxy-install.sh && bash off-proxy-install.sh
    ```
 
-3. Set the dashboard password in the terminal. Press Enter for **All IPv4
-   addresses** or [choose your addresses](docs/guide.md#network-access).
-   Open one of the browser links shown at the end and sign in.
+3. The installer asks for a dashboard password in the terminal. Then set up
+   [access by IP address](docs/guide.md#lan-or-vpn-access). Open your VM or
+   container address with port `8097` in a browser and sign in with that password.
 4. In the dashboard, under **Your datasets**, select **Full import…** on the
    dataset you want, then select **Start full import** to confirm. Repeat for
    each dataset you want. You start initial imports manually. The first food
