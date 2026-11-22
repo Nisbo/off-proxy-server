@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.16
+
+- EN: Explain when a component keeps its version and a newer container build is available.
+- DE: Erklären, wenn für dieselbe Komponentenversion ein neuer Container-Build verfügbar ist.
+
 ## 0.1.15
 
 - EN: Show verified target versions for component updates and place the update

@@ -31,7 +31,7 @@ import control
 import security
 import components
 
-VERSION = "0.1.15"
+VERSION = "0.1.16"
 PROJECTS = {
     "food": "openfoodfacts",
     "beauty": "openbeautyfacts",

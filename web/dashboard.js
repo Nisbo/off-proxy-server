@@ -45,7 +45,8 @@
     syncIncomplete: "Synchronization finished at {time}. Some datasets have gaps or are waiting for a full import.",
     syncUpdatedIncomplete: "Synchronization finished at {time}. Updates were applied. Some datasets still have gaps or are waiting for a full import.",
     syncFailed: "Synchronization ended at {time} with errors. See the dataset status for details.",
-    componentSameVersion: "New image for version {version}",
+    componentBuildAvailable: "New container build available",
+    componentSameVersion: "The component stays at version {version}. The new build may include updated system packages.",
     componentVersionUnknown: "The exact version could not be verified.",
     syncNow: "Synchronize now", settings: "Settings", save: "Save", cancel: "Cancel",
     gapPolicy: "When delta coverage is incomplete", gapContinue: "Apply available deltas", gapPause: "Pause the affected dataset",
@@ -82,7 +83,8 @@
     syncIncomplete: "Abgleich beendet am {time}. Für einige Bestände fehlen Deltas oder steht ein Vollimport aus.",
     syncUpdatedIncomplete: "Abgleich beendet am {time}. Änderungen wurden übernommen. Für einige Bestände fehlen weiterhin Deltas oder steht ein Vollimport aus.",
     syncFailed: "Abgleich endete am {time} mit Fehlern. Details stehen bei den Beständen.",
-    componentSameVersion: "Neues Image für Version {version}",
+    componentBuildAvailable: "Neuer Container-Build verfügbar",
+    componentSameVersion: "Die Komponente bleibt auf Version {version}. Der neue Build kann aktualisierte Systempakete enthalten.",
     componentVersionUnknown: "Die genaue Version konnte nicht ermittelt werden.",
     syncNow: "Daten jetzt abgleichen", settings: "Einstellungen", save: "Speichern", cancel: "Abbrechen",
     gapPolicy: "Bei einer Delta-Lücke", gapContinue: "Verfügbare Deltas fortsetzen", gapPause: "Betroffenen Bestand pausieren",
@@ -214,12 +216,16 @@
       const row = (state.rows || []).find(r=>r.name===name) || {}, installedVersion = state.installed?.[name]?.version || row.installed, installed = installedVersion || "—";
       item.querySelector("h3").textContent = t({python:"componentPython",gunicorn:"componentGunicorn",mongo:"componentMongo"}[name]);
       const target = row.available_version || (name === "gunicorn" ? row.available : null);
-      const versionChange = row.state === "available" && target && installedVersion && target !== installedVersion;
+      const available = row.state === "available";
+      const versionChange = available && target && installedVersion && target !== installedVersion;
+      const newBuild = available && name !== "gunicorn" && target && target === installedVersion;
       item.querySelector("p").textContent = `${t("componentInstalled")}: ${installed}${versionChange ? ` → ${target}` : ""}`;
       const details = item.querySelector(".component-target");
-      details.hidden = row.state !== "available" || Boolean(versionChange);
-      details.textContent = target === installedVersion && target ? t("componentSameVersion", {version: target}) : target || t("componentVersionUnknown");
-      badge(item.querySelector("span"), t(row.state === "available" ? "componentAvailable" : row.state === "current" ? "componentCurrent" : "componentUnknown"), row.state === "current" ? "good" : row.state === "available" ? "busy" : "neutral");
+      details.hidden = !available || Boolean(versionChange);
+      details.textContent = newBuild ? t("componentSameVersion", {version: target}) : target || t("componentVersionUnknown");
+      const label = newBuild ? "componentBuildAvailable" : available ? "componentAvailable"
+        : row.state === "current" ? "componentCurrent" : "componentUnknown";
+      badge(item.querySelector("span"), t(label), row.state === "current" ? "good" : available ? "busy" : "neutral");
     }
   }
   let snapshot = null, lookupResult = null, lookupNotice = null, polling = false, lookupSequence = 0, lookupController = null, offset = 0, connected = false, attemptedConnection = false;
