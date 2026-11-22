@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.17
+
+- EN: Show component update progress and its result beside the update button and on the dashboard.
+  The dashboard reconnects after a service restart and tells you when all components are up to date.
+- DE: Fortschritt und Ergebnis von Komponenten-Updates neben der Update-Schaltfläche und auf der
+  Hauptseite anzeigen. Nach einem Neustart verbindet sich die Anzeige erneut und meldet, wenn alle Komponenten aktuell sind.
+
 ## 0.1.16
 
 - EN: Explain when a component keeps its version and a newer container build is available.

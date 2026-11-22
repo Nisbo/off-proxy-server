@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="dark">
   <title>OFF Proxy Server</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.16">
-  <script defer src="/assets/dashboard.js?v=0.1.16"></script>
+  <link rel="stylesheet" href="/assets/dashboard.css?v=0.1.17">
+  <script defer src="/assets/dashboard.js?v=0.1.17"></script>
 </head>
 <body>
   <main class="shell">
     <header class="header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><div><p class="eyebrow" data-i18n="eyebrow">YOUR LOCAL PRODUCT MIRROR</p><h1>OFF Proxy Server</h1></div></div>
-      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.16</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="header-actions"><button class="secondary" id="logout" type="button" data-i18n="logout" hidden>Sign out</button><span class="version" id="version">0.1.17</span><label class="sr-only" for="language">Language / Sprache</label><select id="language"><option value="de">Deutsch</option><option value="en">English</option></select></div>
     </header>
     <section class="panel login-panel" id="login-panel" aria-labelledby="login-title">
       <p class="eyebrow" data-i18n="protectedAccess">PROTECTED ACCESS</p>
@@ -46,6 +46,7 @@
     <section aria-labelledby="dataset-heading">
       <div class="section-heading dataset-heading"><h2 id="dataset-heading" data-i18n="datasetHeading">Your datasets</h2><div class="control-actions"><button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh display</button><button class="primary" id="sync" type="button" disabled data-i18n="syncNow">Synchronize now</button><button class="secondary" id="access" type="button" disabled data-i18n="access">Access &amp; API</button><button class="secondary" id="components" type="button" disabled data-i18n="components">Components</button><button class="secondary" id="settings" type="button" disabled data-i18n="settings">Settings</button></div></div>
       <p id="control-message" role="status" hidden></p>
+      <p id="components-dashboard-state" class="component-feedback" role="status" hidden></p>
       <div id="dataset-grid" class="dataset-grid"></div>
     </section>
     <section class="panel lookup-panel" aria-labelledby="lookup-heading">
@@ -154,13 +155,14 @@
       <header class="dialog-header"><div><p class="eyebrow" data-i18n="manualOnly">MANUAL UPDATES ONLY</p><h2 id="components-title" data-i18n="componentsTitle">Program &amp; components</h2></div><button class="secondary dialog-close" type="button" data-close="components-dialog" aria-label="Close">×</button></header>
       <div class="dialog-body">
         <p class="muted" data-i18n="componentsHelp">Checks do not install anything. Updates start only after your confirmation.</p>
-        <p id="components-state" role="status" aria-live="polite"></p>
         <p id="components-agent" class="error-message" hidden data-i18n="component_agent_unavailable">The host service is unavailable. Install it with off-proxy host-agent install.</p>
         <div id="components-rows" class="components-rows"></div>
         <div class="components-check-row"><p class="muted" id="components-checked"></p><button class="secondary" id="components-check" type="button" data-i18n="componentsCheck">Check for updates</button></div>
-        <div class="components-maintenance"><button class="primary" id="components-update" type="button" data-i18n="componentsUpdate">Update components…</button></div>
+        <div class="components-maintenance">
+          <p id="components-state" class="component-feedback" role="status" hidden></p>
+          <button class="primary" id="components-update" type="button" data-i18n="componentsUpdate">Update components…</button>
+        </div>
         <section class="components-maintenance"><button class="secondary" id="components-reinstall" type="button" data-i18n="componentsReinstall">Reinstall components…</button><p class="muted" data-i18n="componentsReinstallHelp"></p></section>
-        <p id="components-error" class="error-message" role="status" hidden></p>
       </div>
     </div>
   </dialog>

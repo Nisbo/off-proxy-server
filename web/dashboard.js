@@ -160,12 +160,19 @@
     componentInstalled: "Installed", componentAvailable: "Update available", componentCurrent: "Up to date", componentUnknown: "Could not determine update status",
     componentNever: "Not checked yet", componentChecked: "Last check: {time}", componentIdle: "No update running.",
     componentPending: "Request queued. The host service will process it.", componentChecking: "Checking published component versions…",
+    componentSubmitting: "Requesting the component update…", componentUpdateQueued: "Component update queued.",
+    componentReconnecting: "The connection was interrupted during the update. This page will reconnect automatically.",
+    componentStillReconnecting: "The server is taking longer to respond. This page is still trying to reconnect.",
+    componentReconnectBadge: "Reconnecting", componentUpdateSuccess: "Component update completed successfully.",
+    componentUpdateFailed: "The component update failed. See the host service logs for details.",
+    componentConfirming: "Checking whether the update was queued…",
+    componentUnconfirmed: "The component update request could not be confirmed. You can try again.",
     componentSuccess: "Completed successfully.", componentFailed: "The action failed or the check was incomplete. No further update will be started automatically.",
     componentDeferred: "Update deferred because synchronization started. Please start it again when synchronization has finished.",
     componentInterrupted: "The previous action was interrupted. Check the service and start a new action if needed.",
     componentExpired: "The request expired without being started. Please request it again.",
     componentPreparing: "Preparing update…", componentDownloading: "Downloading component images…", componentBuilding: "Building the replacement image…",
-    componentRestarting: "Restarting services. The connection may be briefly interrupted…", componentVerifying: "Checking the API after restart…"
+    componentRestarting: "Restarting services. This page will reconnect automatically…", componentVerifying: "Checking the API after restart…"
   });
   Object.assign(labels.de, {
     components: "Komponenten", componentsTitle: "Programm & Komponenten", manualOnly: "NUR MANUELLE UPDATES",
@@ -184,33 +191,85 @@
     componentInstalled: "Installiert", componentAvailable: "Update verfügbar", componentCurrent: "Aktuell", componentUnknown: "Update-Status nicht ermittelbar",
     componentNever: "Noch nicht geprüft", componentChecked: "Letzte Prüfung: {time}", componentIdle: "Es läuft kein Update.",
     componentPending: "Anforderung vorgemerkt. Der Host-Dienst übernimmt sie.", componentChecking: "Veröffentlichte Komponentenversionen werden geprüft …",
+    componentSubmitting: "Komponenten-Update wird angefordert …", componentUpdateQueued: "Komponenten-Update vorgemerkt.",
+    componentReconnecting: "Die Verbindung wurde während des Updates unterbrochen. Die Seite verbindet sich automatisch erneut.",
+    componentStillReconnecting: "Der Server braucht länger für eine Antwort. Die Seite versucht weiterhin, sich zu verbinden.",
+    componentReconnectBadge: "Verbindung wird wiederhergestellt", componentUpdateSuccess: "Komponenten-Update erfolgreich abgeschlossen.",
+    componentUpdateFailed: "Das Komponenten-Update ist fehlgeschlagen. Details stehen in den Logs des Host-Dienstes.",
+    componentConfirming: "Es wird geprüft, ob das Update vorgemerkt wurde …",
+    componentUnconfirmed: "Die Anforderung des Komponenten-Updates konnte nicht bestätigt werden. Du kannst es erneut versuchen.",
     componentSuccess: "Erfolgreich abgeschlossen.", componentFailed: "Die Aktion ist fehlgeschlagen oder die Prüfung war unvollständig. Es wird kein weiteres Update automatisch gestartet.",
     componentDeferred: "Update zurückgestellt, weil ein Abgleich gestartet ist. Nach dessen Ende bitte erneut starten.",
     componentInterrupted: "Die vorherige Aktion wurde unterbrochen. Bitte den Dienst prüfen und bei Bedarf eine neue Aktion starten.",
     componentExpired: "Die Anforderung ist abgelaufen, ohne gestartet zu werden. Bitte erneut anfordern.",
     componentPreparing: "Update wird vorbereitet …", componentDownloading: "Komponenten-Images werden geladen …", componentBuilding: "Neues Image wird gebaut …",
-    componentRestarting: "Dienste werden neu gestartet. Die Verbindung kann kurz unterbrochen sein …", componentVerifying: "API wird nach dem Neustart geprüft …"
+    componentRestarting: "Dienste werden neu gestartet. Die Seite verbindet sich danach automatisch erneut …", componentVerifying: "API wird nach dem Neustart geprüft …"
   });
-  let componentState = null, componentReinstall = false;
+  let componentState = null, componentReinstall = false, componentSubmission = null;
+  let componentNotice = null, componentDisconnectedAt = null;
+  const componentNames = ["python", "gunicorn", "mongo"];
+  const componentJobActive = (state) => ["pending", "running"].includes(state?.status);
+  const componentUpdateActive = () => componentSubmission !== null
+    || (componentState?.action === "update" && componentJobActive(componentState));
+
+  function renderComponentFeedback(state, allCurrent) {
+    let key, tone = "busy";
+    if (componentDisconnectedAt !== null) {
+      key = Date.now() - componentDisconnectedAt >= 120000 ? "componentStillReconnecting" : "componentReconnecting";
+    } else if (componentSubmission) {
+      key = {submitting:"componentSubmitting", accepted:"componentUpdateQueued", uncertain:"componentConfirming"}[componentSubmission.status];
+    } else if (componentNotice) {
+      key = componentNotice;
+      tone = key === "components_already_current" ? "good" : "error";
+    } else if (state.status === "pending") {
+      key = state.action === "update" ? "componentUpdateQueued" : "componentPending";
+    } else if (state.status === "running") {
+      const phases = {preparing:"componentPreparing", downloading:"componentDownloading", building:"componentBuilding",
+        restarting:"componentRestarting", verifying:"componentVerifying"};
+      key = state.action === "check" ? "componentChecking" : phases[state.phase] || "componentPreparing";
+    } else {
+      const exceptions = {interrupted:"componentInterrupted", expired:"componentExpired", deferred:"componentDeferred"};
+      key = exceptions[state.result];
+      if (key) tone = state.result === "deferred" ? "warn" : "error";
+      else if (state.status === "failed") {
+        key = state.action === "update" ? "componentUpdateFailed" : "componentFailed";
+        tone = "error";
+      } else if (state.status === "success") {
+        key = state.action === "update" ? "componentUpdateSuccess" : "componentSuccess";
+        tone = "good";
+      }
+    }
+    const current = allCurrent && !componentJobActive(state) && !componentSubmission && !componentNotice && (!key || tone === "good");
+    const message = [key && !(current && key === "componentSuccess") ? t(key) : "",
+      current ? t("components_already_current") : ""].filter(Boolean).join(" ");
+    for (const id of ["components-state", "components-dashboard-state"]) {
+      const el = $(id);
+      const visible = !!message && (id === "components-state" || current || componentUpdateActive()
+        || componentNotice || state.action === "update");
+      el.hidden = !visible;
+      el.dataset.tone = !key && current ? "good" : tone;
+      if (el.textContent !== message) el.textContent = message;
+    }
+  }
+
   function renderComponents() {
-    const state = componentState || {}, busy = ["pending", "running"].includes(state.status);
-    $("components").disabled = !connected;
-    $("components-agent").hidden = !!state.agent_available;
+    const state = componentState || {};
+    const busy = componentJobActive(state) || !!componentSubmission;
+    $("components").disabled = !connected && !componentUpdateActive();
+    $("components-agent").hidden = !!state.agent_available || busy;
     $("components-check").disabled = !connected || !state.agent_available || busy || controlBusy;
     const operationDisabled = $("components-check").disabled || snapshot?.scheduler?.phase === "running";
-    const allCurrent = ["python", "gunicorn", "mongo"].every(name => (state.rows || []).find(row => row.name === name)?.state === "current");
+    const allCurrent = componentNames.every(name => (state.rows || []).find(row => row.name === name)?.state === "current");
     $("components-update").disabled = operationDisabled || allCurrent;
     $("components-update").title = allCurrent ? t("components_already_current") : "";
     $("components-reinstall").disabled = operationDisabled;
     setText("components-confirm-title", t(componentReinstall ? "componentsReinstallTitle" : "componentsConfirmTitle"));
     setText("components-confirm-text", t(componentReinstall ? "componentsReinstallText" : "componentsConfirmText"));
     setText("components-start", t(componentReinstall ? "componentsReinstallStart" : "componentsStart"));
-    const phases = {preparing:"componentPreparing",downloading:"componentDownloading",building:"componentBuilding",restarting:"componentRestarting",verifying:"componentVerifying"};
-    const message = state.status === "pending" ? "componentPending" : state.status === "running" ? (state.action === "check" ? "componentChecking" : phases[state.phase] || "componentPreparing") : state.result === "interrupted" ? "componentInterrupted" : state.result === "expired" ? "componentExpired" : state.status === "success" ? "componentSuccess" : state.status === "failed" ? "componentFailed" : state.status === "deferred" ? "componentDeferred" : "componentIdle";
-    setText("components-state", t(message));
+    renderComponentFeedback(state, allCurrent);
     setText("components-checked", state.checked_at ? t("componentChecked", {time:date(state.checked_at)}) : t("componentNever"));
     const grid = $("components-rows");
-    for (const name of ["python","gunicorn","mongo"]) {
+    for (const name of componentNames) {
       let item = document.getElementById(`component-${name}`);
       if (!item) { item = document.createElement("article"); item.id = `component-${name}`; item.className="component-row"; item.innerHTML='<h3></h3><p class="muted"></p><span class="badge neutral"></span><p class="muted component-target" hidden></p>'; grid.append(item); }
       const row = (state.rows || []).find(r=>r.name===name) || {}, installedVersion = state.installed?.[name]?.version || row.installed, installed = installedVersion || "—";
@@ -268,7 +327,11 @@
   }
 
   function renderStatus() {
-    badge($("connection"), t(!attemptedConnection ? "loading" : connected ? "connected" : "disconnected"), !attemptedConnection ? "neutral" : connected ? "good" : "error");
+    const reconnecting = componentDisconnectedAt !== null;
+    const connectionLabel = reconnecting ? "componentReconnectBadge" : !attemptedConnection ? "loading" : connected ? "connected" : "disconnected";
+    badge($("connection"), t(connectionLabel), reconnecting ? "busy" : !attemptedConnection ? "neutral" : connected ? "good" : "error");
+    $("connection-error").hidden = reconnecting || connected || !attemptedConnection;
+    if (!$("connection-error").hidden) setText("connection-error", t("connectionError"));
     if (!snapshot) return;
     setText("version", snapshot.version);
     setText("total-records", number(snapshot.statistics.records));
@@ -364,38 +427,57 @@
     $("refresh").setAttribute("aria-description", t("refreshHelp"));
     renderStatus(); renderLookup();
     if (fullKind) setText("full-dataset", t(fullKind));
-    if (!$("connection-error").hidden) setText("connection-error", t("connectionError"));
   }
   async function pollStatus() {
     if (!authenticated) { await checkAuth(); return; }
     if (polling) return;
     polling = true;
     const generation = sessionGeneration;
+    const submission = componentSubmission;
+    let componentReachable = false;
     try {
       const response = await fetch("/ui/status", {cache: "no-store", signal: AbortSignal.timeout(12000)});
+      if (generation !== sessionGeneration) return;
       if (response.status === 401) { lockGui("sessionExpired"); return; }
       if (!response.ok) throw new Error("status unavailable");
       const data = await response.json();
       if (!authenticated || generation !== sessionGeneration) return;
-      const componentResponse = await fetch("/ui/components", {cache:"no-store", signal:AbortSignal.timeout(12000)});
-      if (componentResponse.status === 401) { lockGui("sessionExpired"); return; }
-      if (componentResponse.ok) {
-        const componentData = await componentResponse.json();
-        if (!authenticated || generation !== sessionGeneration) return;
-        componentState = componentData;
-      }
       snapshot = data; offset = data.server_epoch - Date.now() / 1000; connected = true;
-      $("connection-error").hidden = true;
+
+      const componentResponse = await fetch("/ui/components", {cache:"no-store", signal:AbortSignal.timeout(12000)});
+      if (generation !== sessionGeneration) return;
+      if (componentResponse.status === 401) { lockGui("sessionExpired"); return; }
+      if (!componentResponse.ok) return;
+      const componentData = await componentResponse.json();
+      if (!authenticated || generation !== sessionGeneration) return;
+      componentState = componentData;
+      componentReachable = true;
+
+      // A poll started before the POST resolved can still contain the previous job.
+      if (submission && componentSubmission === submission && submission.status !== "submitting") {
+        if (submission.status === "uncertain" && componentData.job === submission.previousJob) {
+          componentNotice = "componentUnconfirmed";
+        }
+        componentSubmission = null;
+      }
     } catch (_) {
-      connected = false; $("connection-error").hidden = false;
-      setText("connection-error", t("connectionError"));
-    } finally { polling = false; attemptedConnection = true; renderStatus(); }
+      if (generation === sessionGeneration) connected = false;
+    } finally {
+      polling = false;
+      if (generation === sessionGeneration) {
+        attemptedConnection = true;
+        componentDisconnectedAt = componentReachable || !componentUpdateActive()
+          ? null : (componentDisconnectedAt ?? Date.now());
+        renderStatus();
+      }
+    }
   }
   const eye = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
   $("login-eye").innerHTML = eye; $("api-eye").innerHTML = eye;
   function lockGui(message) {
     sessionGeneration++; lookupSequence++; lookupController?.abort();
     authenticated = false; snapshot = null; componentState = null; connected = false; lookupResult = null;
+    componentSubmission = null; componentNotice = null; componentDisconnectedAt = null;
     $("dashboard-content").hidden = true; $("login-panel").hidden = false; $("logout").hidden = true;
     for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
     for (const id of ["api-key", "current-password", "new-password", "repeat-password", "login-password"]) $(id).value = "";
@@ -541,12 +623,36 @@
     catch (_) { controlNotice = "controlError"; return false; }
     finally { controlBusy = false; await pollStatus(); renderStatus(); }
   }
-  $("components").addEventListener("click", () => { $("components-error").hidden=true; renderComponents(); $("components-dialog").showModal(); });
+  $("components").addEventListener("click", () => { renderComponents(); $("components-dialog").showModal(); });
   async function componentAction(path, values) {
-    controlBusy = true; renderComponents(); $("components-error").hidden=true;
-    try { await authPost(path,values); await pollStatus(); }
-    catch(error) { setText("components-error", t(labels[language][error.message] ? error.message : "controlError")); $("components-error").hidden=false; }
-    finally { controlBusy=false; renderComponents(); }
+    if (controlBusy || !authenticated) return;
+    const generation = sessionGeneration;
+    const update = path === "/ui/components/update";
+    const previousJob = componentState?.job;
+    controlBusy = true;
+    componentNotice = null;
+    if (update) componentSubmission = {status:"submitting", previousJob};
+    renderComponents();
+    try {
+      const result = await authPost(path, values);
+      if (update) componentSubmission = result.queued ? {status:"accepted", previousJob} : null;
+    } catch (error) {
+      if (generation !== sessionGeneration) return;
+      if (update && (!error.status || error.status >= 500) && !labels[language][error.message]) {
+        // The worker may have accepted the update just before the web server went away.
+        componentSubmission = {status:"uncertain", previousJob};
+      } else {
+        componentSubmission = null;
+        componentNotice = labels[language][error.message] ? error.message : "controlError";
+      }
+    } finally {
+      if (generation === sessionGeneration) {
+        renderComponents();
+        await pollStatus();
+      }
+      controlBusy = false;
+      if (generation === sessionGeneration) renderStatus();
+    }
   }
   $("components-check").addEventListener("click", () => componentAction("/ui/components/check",{}));
   for (const [id, reinstall] of [["components-update", false], ["components-reinstall", true]]) {
