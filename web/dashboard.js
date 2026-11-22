@@ -151,7 +151,7 @@
     componentsReinstall: "Reinstall components…", componentsReinstallTitle: "Confirm component reinstallation",
     componentsReinstallStart: "Reinstall now", componentsReinstallHelp: "Rebuild and restart the components even when everything is up to date.",
     componentsReinstallText: "Rebuild Python/Linux, Gunicorn 27.x and MongoDB 8.0.x using the currently available compatible components. Services restart briefly. Data, settings and keys are retained. No full import is requested.",
-    components_already_current: "All components are up to date. No update is needed.",
+    componentLastCheckCurrent: "All components were up to date at the last check · {time}",
     componentsConfirmText: "Refresh Python/Linux, Gunicorn 27.x and MongoDB 8.0.x. Services restart briefly. Your data, settings and keys are retained. No full import is requested.",
     componentsScope: "Host Debian, Docker, your reverse proxy and application code are not updated by this action.",
     component_agent_unavailable: "The host service is unavailable. In the server terminal, run: off-proxy host-agent install",
@@ -182,7 +182,7 @@
     componentsReinstall: "Komponenten erneut installieren …", componentsReinstallTitle: "Erneute Komponenteninstallation bestätigen",
     componentsReinstallStart: "Jetzt erneut installieren", componentsReinstallHelp: "Komponenten erneut aufbauen und neu starten, auch wenn alles aktuell ist.",
     componentsReinstallText: "Python-/Linux-Basis, Gunicorn 27.x und MongoDB 8.0.x mit den derzeit verfügbaren passenden Komponenten erneut aufbauen. Die Dienste werden kurz neu gestartet. Daten, Einstellungen und Schlüssel bleiben erhalten. Es wird kein Vollimport angefordert.",
-    components_already_current: "Alle Komponenten sind aktuell. Es ist kein Update nötig.",
+    componentLastCheckCurrent: "Bei der letzten Prüfung waren alle Komponenten aktuell · {time}",
     componentsConfirmText: "Python-/Linux-Basis, Gunicorn 27.x und MongoDB 8.0.x erneuern. Die Dienste werden kurz neu gestartet. Daten, Einstellungen und Schlüssel bleiben erhalten. Es wird kein Vollimport angefordert.",
     componentsScope: "Debian und Docker auf dem Host, ein eigener Reverse Proxy und der Programmcode werden dabei nicht aktualisiert.",
     component_agent_unavailable: "Der Host-Dienst ist nicht erreichbar. Im Server-Terminal ausführen: off-proxy host-agent install",
@@ -206,11 +206,17 @@
     componentRestarting: "Dienste werden neu gestartet. Die Seite verbindet sich danach automatisch erneut …", componentVerifying: "API wird nach dem Neustart geprüft …"
   });
   let componentState = null, componentReinstall = false, componentSubmission = null;
-  let componentNotice = null, componentDisconnectedAt = null;
+  let componentNotice = null, componentDisconnectedAt = null, componentSessionStarted = null;
   const componentNames = ["python", "gunicorn", "mongo"];
   const componentJobActive = (state) => ["pending", "running"].includes(state?.status);
   const componentUpdateActive = () => componentSubmission !== null
     || (componentState?.action === "update" && componentJobActive(componentState));
+
+  function recentComponentTime(epoch) {
+    if (componentSessionStarted === null || !Number.isFinite(epoch)) return false;
+    const start = Math.max(componentSessionStarted, snapshot?.server_started_epoch ?? 0);
+    return epoch > start && Date.now() / 1000 + offset - epoch < 3600;
+  }
 
   function renderComponentFeedback(state, allCurrent) {
     let key, tone = "busy";
@@ -220,7 +226,7 @@
       key = {submitting:"componentSubmitting", accepted:"componentUpdateQueued", uncertain:"componentConfirming"}[componentSubmission.status];
     } else if (componentNotice) {
       key = componentNotice;
-      tone = key === "components_already_current" ? "good" : "error";
+      tone = "error";
     } else if (state.status === "pending") {
       key = state.action === "update" ? "componentUpdateQueued" : "componentPending";
     } else if (state.status === "running") {
@@ -234,14 +240,16 @@
       else if (state.status === "failed") {
         key = state.action === "update" ? "componentUpdateFailed" : "componentFailed";
         tone = "error";
-      } else if (state.status === "success") {
+      } else if (state.status === "success" && recentComponentTime(state.finished_at)
+          && (state.action === "update" || !allCurrent)) {
         key = state.action === "update" ? "componentUpdateSuccess" : "componentSuccess";
         tone = "good";
       }
     }
-    const current = allCurrent && !componentJobActive(state) && !componentSubmission && !componentNotice && (!key || tone === "good");
-    const message = [key && !(current && key === "componentSuccess") ? t(key) : "",
-      current ? t("components_already_current") : ""].filter(Boolean).join(" ");
+    const current = allCurrent && recentComponentTime(state.checked_at) && !componentJobActive(state)
+      && !componentSubmission && !componentNotice && (!key || tone === "good");
+    const message = [key ? t(key) : "",
+      current ? t("componentLastCheckCurrent", {time:date(state.checked_at)}) : ""].filter(Boolean).join(" ");
     for (const id of ["components-state", "components-dashboard-state"]) {
       const el = $(id);
       const visible = !!message && (id === "components-state" || current || componentUpdateActive()
@@ -261,7 +269,8 @@
     const operationDisabled = $("components-check").disabled || snapshot?.scheduler?.phase === "running";
     const allCurrent = componentNames.every(name => (state.rows || []).find(row => row.name === name)?.state === "current");
     $("components-update").disabled = operationDisabled || allCurrent;
-    $("components-update").title = allCurrent ? t("components_already_current") : "";
+    $("components-update").title = allCurrent && recentComponentTime(state.checked_at)
+      ? t("componentLastCheckCurrent", {time:date(state.checked_at)}) : "";
     $("components-reinstall").disabled = operationDisabled;
     setText("components-confirm-title", t(componentReinstall ? "componentsReinstallTitle" : "componentsConfirmTitle"));
     setText("components-confirm-text", t(componentReinstall ? "componentsReinstallText" : "componentsConfirmText"));
@@ -442,6 +451,7 @@
       if (!response.ok) throw new Error("status unavailable");
       const data = await response.json();
       if (!authenticated || generation !== sessionGeneration) return;
+      componentSessionStarted ??= data.server_epoch;
       snapshot = data; offset = data.server_epoch - Date.now() / 1000; connected = true;
 
       const componentResponse = await fetch("/ui/components", {cache:"no-store", signal:AbortSignal.timeout(12000)});
@@ -477,7 +487,7 @@
   function lockGui(message) {
     sessionGeneration++; lookupSequence++; lookupController?.abort();
     authenticated = false; snapshot = null; componentState = null; connected = false; lookupResult = null;
-    componentSubmission = null; componentNotice = null; componentDisconnectedAt = null;
+    componentSubmission = null; componentNotice = null; componentDisconnectedAt = null; componentSessionStarted = null;
     $("dashboard-content").hidden = true; $("login-panel").hidden = false; $("logout").hidden = true;
     for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
     for (const id of ["api-key", "current-password", "new-password", "repeat-password", "login-password"]) $(id).value = "";
@@ -643,7 +653,8 @@
         componentSubmission = {status:"uncertain", previousJob};
       } else {
         componentSubmission = null;
-        componentNotice = labels[language][error.message] ? error.message : "controlError";
+        componentNotice = error.message === "components_already_current" ? null
+          : labels[language][error.message] ? error.message : "controlError";
       }
     } finally {
       if (generation === sessionGeneration) {

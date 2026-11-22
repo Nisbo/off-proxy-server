@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.18
+
+- EN: Date the component status notice and clear it after one hour or a restart.
+- DE: Die Meldung zum Komponentenstatus datieren und nach einer Stunde oder einem Neustart ausblenden.
+
 ## 0.1.17
 
 - EN: Show component update progress and its result beside the update button and on the dashboard.

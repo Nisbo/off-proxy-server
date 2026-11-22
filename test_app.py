@@ -397,6 +397,8 @@ def test_authenticated_status_redacts_internal_state_and_counts_published_record
     status, data = get(http + "/ui/status", auth=False)
     assert status == 200
     assert data["statistics"]["records"] == 1
+    assert 0 < data["server_started_epoch"] <= data["server_epoch"]
+    assert get(http + "/ui/status", auth=False)[1]["server_started_epoch"] == data["server_started_epoch"]
     assert data["datasets"]["food"]["next_full_epoch"] is None
     assert data["settings"]["full_import_policy"] == "confirm"
     assert data["datasets"]["beauty"]["ready"] is False

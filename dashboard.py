@@ -35,6 +35,7 @@ SCHEDULER_FIELDS = (
 class Dashboard:
     def __init__(self, db, version, projects):
         self.db, self.version, self.projects = db, version, projects
+        self.started_epoch = time.time()
         self._lock = threading.Lock()
         self._stats = None
         self._stats_key = None
@@ -92,7 +93,8 @@ class Dashboard:
         schedule["stale"] = bool(heartbeat and (
             (schedule["phase"] == "running" and now - heartbeat > 120) or
             (schedule["phase"] == "waiting" and deadline and now > deadline + 120)))
-        return {"version": self.version, "server_epoch": now, "datasets": datasets,
+        return {"version": self.version, "server_epoch": now, "server_started_epoch": self.started_epoch,
+                "datasets": datasets,
                 "settings": options,
                 "requests": {r["_id"]: {k: r[k] for k in ("status", "error", "started_epoch", "finished_epoch", "outcome") if k in r}
                              for r in self.db.requests.find({}) if r["_id"] in ("sync", *("full:" + k for k in self.projects))},
