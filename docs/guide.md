@@ -108,13 +108,16 @@ Git commit. A stable release tag uses the format `v0.2.0`. A beta prerelease use
 | `off-proxy test 4062139025398 all` | Look up a barcode across all datasets |
 | `off-proxy password` | Set or reset the dashboard password |
 | `off-proxy bind` | Show or change the dashboard and API addresses |
-| `off-proxy update` | Install the latest commit from `main` |
+| `off-proxy update` | Install the latest published stable release |
 | `off-proxy update beta` | Install the latest published beta release |
 | `off-proxy update beta --head` | Install the latest commit from `beta` |
 | `off-proxy components-update` | Rebuild the installed program with refreshed container components |
 | `off-proxy rollback` | Return to the previous locally stored software version |
 | `off-proxy stop` / `off-proxy start` | Stop or start the services |
 | `off-proxy down` | Remove the project's containers and networks while keeping data |
+
+If the selected channel has no published release, the updater reports that
+no release is available and leaves the installation as it is.
 
 ### Container components
 

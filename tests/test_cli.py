@@ -12,6 +12,9 @@ import pytest
 from .test_support import runtime_entries
 
 SOURCE = Path(__file__).resolve().parents[1]
+STABLE_VERSION = (SOURCE / "VERSION").read_text().strip()
+CURRENT_STABLE_RELEASE = f"{'a' * 40} {STABLE_VERSION}"
+NEXT_STABLE_RELEASE = f"{'b' * 40} {STABLE_VERSION}"
 
 
 @pytest.fixture
@@ -25,7 +28,7 @@ def installation(tmp_path):
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                OFF_PROXY_DIR=str(root), OFF_PROXY_BIN_DIR=str(tmp_path / "local-bin"),
                OFF_PROXY_DISABLE_HOST_AGENT='1', FAKE_REMOTE=str(remote), FAKE_SOURCE=str(SOURCE), FAKE_LOG=str(log), FAKE_RELEASE="a" * 40,
-               FAKE_STABLE_TAG="v"+(SOURCE/"VERSION").read_text().strip())
+               FAKE_STABLE_TAG="v"+STABLE_VERSION)
     programs = {
         "id": "#!/bin/sh\necho 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
@@ -60,8 +63,10 @@ if a[:2]==['image','inspect']:
 if a[:1]==['pull']:sys.exit(1 if os.environ.get('FAKE_PULL_FAIL')=='1' else 0)
 if '-f' not in a:sys.exit(9)
 if 'run' in a and 'releases.py' in a:
-    print(os.environ.get('FAKE_PUBLISHED',''))
-    sys.exit(0 if os.environ.get('FAKE_PUBLISHED') else 1)
+    if not os.environ.get('FAKE_PUBLISHED'):
+        sys.exit('No published release in this channel / Kein veröffentlichtes Release in diesem Kanal.')
+    print(os.environ['FAKE_PUBLISHED'])
+    sys.exit(0)
 source=a[a.index('-f')+1]
 if 'config' in a or 'up' in a:
     bind_ip=os.environ['BIND_IP']
@@ -130,7 +135,7 @@ def test_new_install_and_idempotent_update(installation):
     assert (root / ".env").stat().st_mode & 0o777 == 0o600
     assert Path(env["OFF_PROXY_BIN_DIR"], "off-proxy").exists()
     log.write_text("")
-    result = run("update")
+    result = run("update", FAKE_PUBLISHED=CURRENT_STABLE_RELEASE)
     assert result.returncode == 0, result.stderr
     assert "Already current" in result.stdout
     assert not any("stop" in call or "up" in call for call in docker_calls(log))
@@ -147,7 +152,7 @@ def test_update_preserves_managed_runtime_location(installation):
     (root/".state/project").write_text("existing-project\n")
     settings = (root/".env").read_bytes()
     log.write_text("")
-    result = run("update", FAKE_RELEASE="b"*40)
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
     assert result.returncode == 0, result.stderr
     assert (root/".env").read_bytes() == settings
     assert (data_dir/"database").read_bytes() == b"existing products"
@@ -161,7 +166,7 @@ def test_update_preserves_configuration_and_rolls_back(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     config = (root / ".env").read_bytes()
-    result = run("update", FAKE_RELEASE="b" * 40)
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
     assert result.returncode == 0, result.stderr
     assert (root / ".state/current").read_text().strip() == "b" * 40
     assert (root / ".env").read_bytes() == config
@@ -173,7 +178,7 @@ def test_failed_build_leaves_old_services_running(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     log.write_text("")
-    result = run("update", FAKE_RELEASE="b" * 40, FAKE_BUILD_FAIL="1")
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_BUILD_FAIL="1")
     assert result.returncode != 0
     assert (root / ".state/current").read_text().strip() == "a" * 40
     assert not any("stop" in call or "up" in call for call in docker_calls(log))
@@ -183,7 +188,7 @@ def test_failed_api_restores_old_services(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     log.write_text("")
-    result = run("update", FAKE_RELEASE="b" * 40, FAKE_BAD_RELEASE="b" * 40)
+    result = run("update", FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_BAD_RELEASE="b" * 40)
     assert result.returncode != 0
     assert "restoring previous" in result.stderr
     assert (root / ".state/current").read_text().strip() == "a" * 40
@@ -196,7 +201,7 @@ def test_update_during_import_does_not_fetch_or_stop(installation):
     root, env, log, run = installation
     assert run("install").returncode == 0
     log.write_text("")
-    result = run("update", FAKE_BUSY="1", FAKE_RELEASE="b" * 40)
+    result = run("update", FAKE_BUSY="1", FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
     assert result.returncode != 0
     assert not (root / "releases" / ("b" * 40)).exists()
     assert not any("stop" in call for call in docker_calls(log))
@@ -324,7 +329,7 @@ def test_bind_preserves_settings_on_update_and_failed_rebind(installation):
     assert 'http://198.51.100.20:8097/' in result.stdout
     saved = (root/'.env').read_bytes()
     assert b'KEEP=existing\n' in saved and b'BIND_EXTRA_IPS=198.51.100.20\n' in saved
-    assert run('update', FAKE_RELEASE='b'*40).returncode == 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE).returncode == 0
     assert (root/'.env').read_bytes() == saved
     assert run('rollback').returncode == 0
     assert (root/'.env').read_bytes() == saved
@@ -417,6 +422,36 @@ def test_update_beta_head_fetches_only_the_beta_branch(installation):
     assert "0.2.0-beta.1 ready" in result.stdout
 
 
+@pytest.mark.parametrize("channel, options", [("stable", ()), ("beta", ("beta",))])
+def test_update_without_published_release_does_not_fetch_or_restart(installation, channel, options):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    downloads = Path(str(log)+".downloads")
+    before = downloads.read_bytes()
+    settings = (root/".env").read_bytes()
+    log.write_text("")
+    result = run("update", *options, FAKE_RELEASE="b"*40, FAKE_BUSY="1")
+    assert result.returncode != 0
+    assert "No published release in this channel" in result.stderr
+    assert "Kein veröffentlichtes Release in diesem Kanal" in result.stderr
+    assert (root/".state/current").read_text().strip() == "a"*40
+    assert (root/".env").read_bytes() == settings
+    assert downloads.read_bytes() == before
+    assert [call[-3:] for call in docker_calls(log) if "-f" in call] == [["api", "releases.py", channel]]
+
+
+def test_update_installs_stable_release_commit_instead_of_main_head(installation):
+    root, _, log, run = installation
+    assert run("install").returncode == 0
+    result = run("update", FAKE_RELEASE="c"*40, FAKE_PUBLISHED=NEXT_STABLE_RELEASE)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (root/".state/current").read_text().strip() == "b"*40
+    assert ["api", "releases.py", "stable"] in [call[-3:] for call in docker_calls(log)]
+    downloads = Path(str(log)+".downloads").read_text().splitlines()
+    assert not any("/commits/" in url for url in downloads)
+    assert downloads[-1].endswith("/tar.gz/"+"b"*40)
+
+
 def test_update_beta_installs_the_published_commit_and_requires_the_packaged_version(installation):
     root, _, log, run = installation
     assert run("install").returncode == 0
@@ -456,7 +491,7 @@ def test_failed_download_leaves_installed_version_and_data_unchanged(installatio
     assert run('install').returncode == 0
     before = (root/'.env').read_bytes()
     log.write_text('')
-    assert run('update', FAKE_RELEASE='b'*40, FAKE_FETCH_FAIL='1').returncode != 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_FETCH_FAIL='1').returncode != 0
     assert (root/'.state/current').read_text().strip() == 'a'*40
     assert (root/'.env').read_bytes() == before
     assert not any('stop' in call for call in docker_calls(log))
@@ -466,7 +501,7 @@ def test_racing_cycle_defers_update_after_build_before_stop(installation):
     root, env, log, run = installation
     assert run('install').returncode == 0
     log.write_text('')
-    result = run('update', FAKE_RELEASE='b'*40, FAKE_MAINTENANCE_BUSY='1')
+    result = run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_MAINTENANCE_BUSY='1')
     assert result.returncode != 0
     assert 'deferred' in result.stderr
     calls = docker_calls(log)
@@ -480,7 +515,7 @@ def test_gate_is_acquired_before_stop_and_released_after_success_or_restore(inst
     assert run('install').returncode == 0
     for bad in ('@', 'b'*40):
         log.write_text('')
-        result = run('update', FAKE_RELEASE='b'*40, FAKE_BAD_RELEASE=bad)
+        result = run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_BAD_RELEASE=bad)
         calls = docker_calls(log)
         gate = next(i for i, c in enumerate(calls) if any('result=db.scheduler.update_one' in x for x in c))
         stop = next(i for i, c in enumerate(calls) if 'stop' in c)
@@ -497,7 +532,7 @@ def test_stopped_stack_can_be_updated_without_a_running_api(installation):
     root, env, log, run = installation
     assert run('install').returncode == 0
     log.write_text('')
-    assert run('update', FAKE_RELEASE='b'*40, FAKE_RUNNING='0').returncode == 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE, FAKE_RUNNING='0').returncode == 0
     assert (root/'.state/current').read_text().strip() == 'b'*40
     assert not any(any('result=db.scheduler.update_one' in x for x in call) for call in docker_calls(log))
 
@@ -528,7 +563,7 @@ def test_components_update_rebuilds_current_source_only_and_pins_images(installa
     images = [json.loads(line) for line in Path(str(log)+'.images').read_text().splitlines()]
     assert images[-1][1:] == [tag, 'mongo@sha256:'+'b'*64]
     # Ordinary same-commit updates keep the refreshed images.
-    assert run('update').returncode == 0
+    assert run('update', FAKE_PUBLISHED=CURRENT_STABLE_RELEASE).returncode == 0
     assert (root/'.state'/('image-'+'a'*40)).read_text().strip() == tag
 
 
@@ -597,5 +632,5 @@ def test_manifest_transports_future_modules_without_updater_changes(installation
         for name,body in files.items():
             entry=tarfile.TarInfo(name);entry.size=len(body);entry.mode=0o644
             target.addfile(entry,io.BytesIO(body))
-    assert run('update',FAKE_RELEASE='b'*40).returncode == 0
+    assert run('update', FAKE_PUBLISHED=NEXT_STABLE_RELEASE).returncode == 0
     assert (root/'releases'/('b'*40)/'server'/'future_runtime.py').is_file()

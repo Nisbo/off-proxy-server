@@ -112,13 +112,16 @@ Beta-Pre-Releases verwenden `v0.2.0-beta.1`. Der Tag muss zur `VERSION`-Datei pa
 | `off-proxy test 4062139025398 all` | Barcode über alle Bestände abfragen |
 | `off-proxy password` | GUI-Passwort festlegen oder zurücksetzen |
 | `off-proxy bind` | Adressen für Weboberfläche und API anzeigen oder ändern |
-| `off-proxy update` | Neuesten Commit von `main` installieren |
+| `off-proxy update` | Neuestes veröffentlichtes stabiles Release installieren |
 | `off-proxy update beta` | Neuestes veröffentlichtes Beta-Release installieren |
 | `off-proxy update beta --head` | Neuesten Commit von `beta` installieren |
 | `off-proxy components-update` | Installierten Programmstand mit neuen Container-Komponenten aufbauen |
 | `off-proxy rollback` | Vorherige lokal gespeicherte Programmversion starten |
 | `off-proxy stop` / `off-proxy start` | Dienste stoppen oder starten |
 | `off-proxy down` | Projektcontainer und Netzwerke entfernen, Daten behalten |
+
+Ohne veröffentlichtes Release im gewählten Kanal meldet der Updater, dass
+kein Release verfügbar ist. Die Installation bleibt dabei unverändert.
 
 ### Container-Komponenten
 

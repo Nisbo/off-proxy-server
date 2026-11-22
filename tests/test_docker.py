@@ -86,7 +86,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         compose('exec','-T','api','python','-c', 'from app import database,save_product; db=database(); save_product(db.food_smoke,{"code":"0123456789012","product_name":"Preserved smoke product"})')
         manage('status'); wait_idle(client)
         assert client.call('/health', key=rotated)[1]['version'] == version
-        manage('update', commit='b'*40, cli=root/'off-proxy')
+        manage('update', 'beta', '--head', commit='b'*40, cli=root/'off-proxy')
         assert (root/'.env').read_bytes() == initial_env
         assert client.call('/health', key=rotated)[1]['version'] == newer
         assert client.call('/health', key=token)[0] == 401
@@ -139,7 +139,7 @@ else:shutil.copyfile(pathlib.Path(os.environ['SMOKE_ARCHIVES'])/(os.environ['SMO
         compose('stop','sync')
         compose('exec','-T','api','python','-c','from app import database; database().state.update_one({"_id":"food"},{"$set":{"ready":True,"collection":"food_smoke"}},upsert=True)')
         assert client.call('/api/v3/product/0123456789012.json', key=rotated)[0] == 200
-        manage('update',cli=root/'off-proxy')  # Same old version: does not restart/import.
+        manage('update', 'beta', '--head', cli=root/'off-proxy')  # Same old version: does not restart/import.
 
         assert (root/'.env').read_bytes() == initial_env
 

@@ -181,15 +181,13 @@ runtime_complete() {
 }
 
 fetch_release() {
-  local branch=${2:-main}
-  [[ $branch == main || $branch == beta ]] || die 'Invalid update branch.'
   TEMP=$(mktemp -d "$ROOT/.stage.XXXXXX")
-  if [[ -n ${1:-} ]]; then
-    RELEASE=$1
-  else
-  curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 90 \
-    "https://api.github.com/repos/Nisbo/off-proxy-server/commits/$branch" -o "$TEMP/commit.json"
-  RELEASE=$(sed -nE '/^[[:space:]]*"sha":/ {s/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/;p;q;}' "$TEMP/commit.json")
+  RELEASE=${1:-}
+  if [[ -z $RELEASE ]]; then
+    # Only the explicit beta --head path fetches a branch tip.
+    curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 90 \
+      "https://api.github.com/repos/Nisbo/off-proxy-server/commits/beta" -o "$TEMP/commit.json"
+    RELEASE=$(sed -nE '/^[[:space:]]*"sha":/ {s/^[[:space:]]*"sha":[[:space:]]*"([a-f0-9]{40})".*/\1/;p;q;}' "$TEMP/commit.json")
   fi
   [[ $RELEASE =~ ^[a-f0-9]{40}$ ]] || die 'GitHub did not return a valid commit.'
   if ! runtime_complete "$ROOT/releases/$RELEASE"; then
@@ -318,13 +316,12 @@ resolve_program_release() {
 }
 
 update_program() {
-  local mode=$1 channel=${2:-} pinned=${3:-} expected=${4:-} old resolved commit version extra
+  local mode=$1 channel=${2:-} pinned=${3:-} expected=${4:-} old resolved commit='' version extra
   lock_operation
   old=$(cat "$ROOT/.state/current")
-  check_import_idle "$(source_for "$old")"
   if [[ -n $channel ]]; then
     if [[ $mode == host ]]; then component_phase downloading; fi
-    resolved=$(resolve_program_release "$channel")
+    resolved=$(resolve_program_release "$channel") || return "$?"
     read -r commit version extra <<< "$resolved"
     [[ $commit =~ ^[a-f0-9]{40}$ && $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ && -z $extra ]] ||
       die 'Invalid published release.'
@@ -332,11 +329,12 @@ update_program() {
       printf 'Published release changed; check for updates again.\n' >&2
       return 76
     fi
-    fetch_release "$commit"
+  fi
+  check_import_idle "$(source_for "$old")"
+  fetch_release "$commit"
+  if [[ -n $channel ]]; then
     [[ $(version_for "$(source_for "$RELEASE")") == "$version" ]] ||
       die 'Release tag and packaged version differ. Existing services unchanged.'
-  else
-    fetch_release "" "$mode"
   fi
   if [[ $old == "$RELEASE" ]]; then printf 'Already current.\n'; return; fi
   activate "$RELEASE" "$old" "$mode"
@@ -745,9 +743,9 @@ main() {
   load_state
   case "$action" in
     update)
-      if [[ $# == 1 ]]; then update_program main
+      if [[ $# == 1 ]]; then update_program release stable
       elif [[ $# == 2 && $2 == beta ]]; then update_program release beta
-      elif [[ $# == 3 && $2 == beta && $3 == --head ]]; then update_program beta
+      elif [[ $# == 3 && $2 == beta && $3 == --head ]]; then update_program head
       else die 'Usage: off-proxy update [beta [--head]]'
       fi ;;
     program-release-install)
